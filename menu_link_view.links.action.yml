@@ -1,0 +1,5 @@
+menu_link_view.add_action:
+  route_name: menu_link_view.add
+  title: 'Add dynamic view menu item'
+  appears_on:
+    - entity.menu.edit_form

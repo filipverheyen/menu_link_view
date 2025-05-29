@@ -1,0 +1,7 @@
+menu_link_view.add:
+  path: '/admin/structure/menu-link-view/add'
+  defaults:
+    _form: '\Drupal\menu_link_view\Form\MenuLinkViewAddForm'
+    _title: 'Add dynamic view menu item'
+  requirements:
+    _permission: 'administer menu link view'

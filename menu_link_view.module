@@ -1,0 +1,5 @@
+<?php
+
+function menu_link_view_init() {
+  \Drupal::logger('menu_link_view')->notice('Plugin check: ' . (class_exists(\Drupal\menu_link_view\Plugin\Menu\MenuLinkViewPlugin::class) ? 'yes' : 'no'));
+}

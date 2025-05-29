@@ -1,0 +1,7 @@
+name: 'Menu Link View'
+type: module
+description: 'Dynamically generates menu links based on Views.'
+core_version_requirement: ^11
+package: Custom
+dependencies:
+  - views

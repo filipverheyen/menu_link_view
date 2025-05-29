@@ -1,0 +1,9 @@
+<?php
+
+/**
+ * Implements hook_update_N().
+ */
+function menu_link_view_update_8101() {
+  $entity_type = \Drupal::entityTypeManager()->getDefinition('menu_link_view');
+  \Drupal::entityDefinitionUpdateManager()->installEntityType($entity_type);
+}
