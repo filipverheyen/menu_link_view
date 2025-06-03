@@ -1,5 +1,5 @@
 menu_link_view.add:
-  path: "/admin/structure/menu/view-link/{menu}"
+  path: "/admin/structure/menu/{menu}/add-view-link"
   defaults:
     _title: "Add view menu link"
     _form: 'Drupal\menu_link_view\Form\MenuLinkViewAddForm'
@@ -39,5 +39,13 @@ menu_link_view.collection:
   defaults:
     _entity_list: "menu_link_view"
     _title: "View menu links"
+  requirements:
+    _permission: "administer menu"
+
+menu_link_view.rebuild:
+  path: "/admin/structure/menu/rebuild-view-links"
+  defaults:
+    _form: 'Drupal\menu_link_view\Form\MenuLinkViewRebuildForm'
+    _title: "Rebuild menu link views"
   requirements:
     _permission: "administer menu"

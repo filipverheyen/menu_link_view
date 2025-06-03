@@ -4,3 +4,9 @@ menu_link_view.add_link:
   appears_on:
     - entity.menu.edit_form
   class: Drupal\Core\Menu\LocalActionDefault
+
+menu_link_view.rebuild:
+  route_name: menu_link_view.rebuild
+  title: "Rebuild menu link views"
+  appears_on:
+    - entity.menu.collection

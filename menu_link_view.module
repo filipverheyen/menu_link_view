@@ -72,3 +72,24 @@ function menu_link_view_preprocess_menu(&$variables) {
     \Drupal::service('menu_link_view.expander')->expandMenuItems($variables['items']);
   }
 }
+
+/**
+ * Implements hook_module_implements_alter().
+ */
+function menu_link_view_module_implements_alter(&$implementations, $hook) {
+  if ($hook == 'menu_links_discovered_alter') {
+    // Move our implementation to the end to ensure it runs after other modules.
+    $group = $implementations['menu_link_view'];
+    unset($implementations['menu_link_view']);
+    $implementations['menu_link_view'] = $group;
+  }
+}
+
+/**
+ * Implements hook_menu_links_discovered_alter().
+ */
+function menu_link_view_menu_links_discovered_alter(&$links) {
+  // This hook is called when menu links are collected.
+  // We don't need to do anything here specifically, but implementing the hook
+  // ensures our derivatives are properly collected.
+}

@@ -2,9 +2,10 @@
 
 namespace Drupal\menu_link_view\Plugin\Menu;
 
-use Drupal\Core\Menu\MenuLinkDefault;
+use Drupal\Core\Menu\MenuLinkBase;
 use Drupal\Core\Menu\StaticMenuLinkOverridesInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
+use Drupal\Core\Url;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -15,7 +16,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  *   deriver = "Drupal\menu_link_view\Plugin\Derivative\MenuLinkViewDerivative"
  * )
  */
-class MenuLinkViewLink extends MenuLinkDefault implements ContainerFactoryPluginInterface {
+class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInterface {
 
   /**
    * The static menu link service.
@@ -57,11 +58,70 @@ class MenuLinkViewLink extends MenuLinkDefault implements ContainerFactoryPlugin
    * {@inheritdoc}
    */
   public function getTitle() {
+    $title = $this->pluginDefinition['title'];
     if ($this->isInAdminContext()) {
       // In the admin UI, append [View Reference] to make it clear this is a special link.
-      return $this->pluginDefinition['title'] . ' [View Reference]';
+      $title .= ' [View Reference]';
     }
-    return $this->pluginDefinition['title'];
+    return $title;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getDescription() {
+    return $this->pluginDefinition['description'];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getRouteName() {
+    // Use <nolink> route for the placeholder item.
+    return '<nolink>';
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getUrlObject() {
+    return Url::fromRoute('<nolink>');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function isEnabled() {
+    // This retrieves any overridden value for 'enabled'.
+    $enabled = $this->getOverrideValue('enabled');
+    return $enabled === NULL ? TRUE : (bool) $enabled;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function isExpanded() {
+    // This retrieves any overridden value for 'expanded'.
+    $expanded = $this->getOverrideValue('expanded');
+    return $expanded === NULL ? TRUE : (bool) $expanded;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getParent() {
+    // This retrieves any overridden value for 'parent'.
+    $parent = $this->getOverrideValue('parent');
+    return $parent ?? $this->pluginDefinition['parent'];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getWeight() {
+    // This retrieves any overridden value for 'weight'.
+    $weight = $this->getOverrideValue('weight');
+    return $weight ?? $this->pluginDefinition['weight'];
   }
 
   /**
@@ -78,14 +138,6 @@ class MenuLinkViewLink extends MenuLinkDefault implements ContainerFactoryPlugin
     }
 
     return $options;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getRouteName() {
-    // Use <nolink> route for the placeholder item.
-    return '<nolink>';
   }
 
   /**
@@ -119,6 +171,20 @@ class MenuLinkViewLink extends MenuLinkDefault implements ContainerFactoryPlugin
    */
   public function deleteLink() {
     // Nothing to do here since the entity deletion will handle this.
+  }
+
+  /**
+   * Gets the value for a definition override.
+   *
+   * @param string $key
+   *   The definition key.
+   *
+   * @return mixed
+   *   The override value or NULL if no override exists.
+   */
+  protected function getOverrideValue($key) {
+    $overrides = $this->staticOverride->getOverride($this->getPluginId());
+    return $overrides[$key] ?? NULL;
   }
 
   /**

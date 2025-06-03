@@ -59,29 +59,32 @@ class MenuLinkViewDerivative extends DeriverBase implements ContainerDeriverInte
   public function getDerivativeDefinitions($base_plugin_definition) {
     $links = [];
 
-    // Get all menu link view config entities.
-    $menu_link_view_storage = $this->entityTypeManager->getStorage('menu_link_view');
-    $menu_link_views = $menu_link_view_storage->loadMultiple();
+    try {
+      // Get all menu link view config entities.
+      $menu_link_view_storage = $this->entityTypeManager->getStorage('menu_link_view');
+      $menu_link_views = $menu_link_view_storage->loadMultiple();
 
-    foreach ($menu_link_views as $menu_link_view) {
-      $id = $menu_link_view->id();
-      $links[$id] = [
-        'id' => 'menu_link_view:' . $id,
-        'title' => $menu_link_view->label(),
-        'description' => $menu_link_view->getDescription(),
-        'menu_name' => $menu_link_view->getMenuName(),
-        'expanded' => TRUE,
-        'parent' => $menu_link_view->getParent(),
-        'weight' => $menu_link_view->getWeight(),
-        'provider' => 'menu_link_view',
-        'class' => 'Drupal\menu_link_view\Plugin\Menu\MenuLinkViewLink',
-        'options' => [],
-        'metadata' => [
-          'entity_id' => $id,
-          'view_id' => $menu_link_view->getViewId(),
-          'display_id' => $menu_link_view->getDisplayId(),
-        ],
-      ] + $base_plugin_definition;
+      foreach ($menu_link_views as $menu_link_view) {
+        $id = $menu_link_view->id();
+        $links[$id] = [
+          'id' => 'menu_link_view:' . $id,
+          'title' => $menu_link_view->label(),
+          'description' => $menu_link_view->getDescription(),
+          'menu_name' => $menu_link_view->getMenuName(),
+          'expanded' => TRUE,
+          'parent' => $menu_link_view->getParent(),
+          'weight' => $menu_link_view->getWeight(),
+          'provider' => 'menu_link_view',
+          'metadata' => [
+            'entity_id' => $id,
+            'view_id' => $menu_link_view->getViewId(),
+            'display_id' => $menu_link_view->getDisplayId(),
+          ],
+        ] + $base_plugin_definition;
+      }
+    }
+    catch (\Exception $e) {
+      \Drupal::logger('menu_link_view')->error('Error getting derivative definitions: @message', ['@message' => $e->getMessage()]);
     }
 
     return $links;
