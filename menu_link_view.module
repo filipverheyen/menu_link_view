@@ -74,22 +74,39 @@ function menu_link_view_preprocess_menu(&$variables) {
 }
 
 /**
- * Implements hook_module_implements_alter().
+ * Implements hook_menu_links_discovered_alter().
  */
-function menu_link_view_module_implements_alter(&$implementations, $hook) {
-  if ($hook == 'menu_links_discovered_alter') {
-    // Move our implementation to the end to ensure it runs after other modules.
-    $group = $implementations['menu_link_view'];
-    unset($implementations['menu_link_view']);
-    $implementations['menu_link_view'] = $group;
+function menu_link_view_menu_links_discovered_alter(&$links) {
+  // Ensure our menu links are discovered properly.
+  // This implementation ensures the hook is called.
+}
+
+/**
+ * Implements hook_entity_insert().
+ */
+function menu_link_view_entity_insert($entity) {
+  // Rebuild menu links when a menu link view entity is added.
+  if ($entity->getEntityTypeId() == 'menu_link_view') {
+    \Drupal::service('plugin.manager.menu.link')->rebuild();
   }
 }
 
 /**
- * Implements hook_menu_links_discovered_alter().
+ * Implements hook_entity_update().
  */
-function menu_link_view_menu_links_discovered_alter(&$links) {
-  // This hook is called when menu links are collected.
-  // We don't need to do anything here specifically, but implementing the hook
-  // ensures our derivatives are properly collected.
+function menu_link_view_entity_update($entity) {
+  // Rebuild menu links when a menu link view entity is updated.
+  if ($entity->getEntityTypeId() == 'menu_link_view') {
+    \Drupal::service('plugin.manager.menu.link')->rebuild();
+  }
+}
+
+/**
+ * Implements hook_entity_delete().
+ */
+function menu_link_view_entity_delete($entity) {
+  // Rebuild menu links when a menu link view entity is deleted.
+  if ($entity->getEntityTypeId() == 'menu_link_view') {
+    \Drupal::service('plugin.manager.menu.link')->rebuild();
+  }
 }

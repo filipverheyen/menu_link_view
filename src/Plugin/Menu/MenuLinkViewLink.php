@@ -91,6 +91,13 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
   /**
    * {@inheritdoc}
    */
+  public function getMenuName() {
+    return $this->pluginDefinition['menu_name'];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function isEnabled() {
     // This retrieves any overridden value for 'enabled'.
     $enabled = $this->getOverrideValue('enabled');
@@ -171,6 +178,31 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
    */
   public function deleteLink() {
     // Nothing to do here since the entity deletion will handle this.
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getTranslateRoute() {
+    return NULL;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getEditRoute() {
+    return new Url('entity.menu_link_view.edit_form', [
+      'menu_link_view' => str_replace('menu_link_view:', '', $this->getPluginId()),
+    ]);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getDeleteRoute() {
+    return new Url('entity.menu_link_view.delete_form', [
+      'menu_link_view' => str_replace('menu_link_view:', '', $this->getPluginId()),
+    ]);
   }
 
   /**

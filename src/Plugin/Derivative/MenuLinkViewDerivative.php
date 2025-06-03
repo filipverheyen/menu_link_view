@@ -66,20 +66,27 @@ class MenuLinkViewDerivative extends DeriverBase implements ContainerDeriverInte
 
       foreach ($menu_link_views as $menu_link_view) {
         $id = $menu_link_view->id();
+        $plugin_id = 'menu_link_view:' . $id;
+
         $links[$id] = [
-          'id' => 'menu_link_view:' . $id,
+          'id' => $plugin_id,
           'title' => $menu_link_view->label(),
           'description' => $menu_link_view->getDescription(),
           'menu_name' => $menu_link_view->getMenuName(),
           'expanded' => TRUE,
-          'parent' => $menu_link_view->getParent(),
+          'parent' => $menu_link_view->getParent() ?: '',
           'weight' => $menu_link_view->getWeight(),
           'provider' => 'menu_link_view',
+          'class' => 'Drupal\menu_link_view\Plugin\Menu\MenuLinkViewLink',
+          'form_class' => 'Drupal\menu_link_view\Form\MenuLinkViewForm',
+          'options' => [],
           'metadata' => [
             'entity_id' => $id,
             'view_id' => $menu_link_view->getViewId(),
             'display_id' => $menu_link_view->getDisplayId(),
+            'entity_type' => 'menu_link_view',
           ],
+          'route_name' => '<nolink>',
         ] + $base_plugin_definition;
       }
     }
