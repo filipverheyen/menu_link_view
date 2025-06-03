@@ -1,7 +1,8 @@
-name: 'Menu Link View'
+name: Menu Link View
+description: "Populate menus dynamically with the results of a View."
 type: module
-description: 'Dynamically generates menu links based on Views.'
 core_version_requirement: ^11
-package: Custom
+package: Menu
 dependencies:
-  - views
+  - drupal:menu_ui
+  - drupal:views

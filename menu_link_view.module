@@ -1,5 +1,74 @@
 <?php
 
-function menu_link_view_init() {
-  \Drupal::logger('menu_link_view')->notice('Plugin check: ' . (class_exists(\Drupal\menu_link_view\Plugin\Menu\MenuLinkViewPlugin::class) ? 'yes' : 'no'));
+/**
+ * @file
+ * Contains hook implementations for menu_link_view.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\views\ViewExecutable;
+
+/**
+ * Implements hook_help().
+ */
+function menu_link_view_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    case 'help.page.menu_link_view':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('The Menu Link View module allows you to dynamically populate menus using Views results.') . '</p>';
+      $output .= '<h3>' . t('Uses') . '</h3>';
+      $output .= '<dl>';
+      $output .= '<dt>' . t('Creating dynamic menu links') . '</dt>';
+      $output .= '<dd>' . t('Create a View that returns entity references, then add a dynamic menu link that references this View.') . '</dd>';
+      $output .= '</dl>';
+      return $output;
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function menu_link_view_theme() {
+  return [
+    'menu_link_view_placeholder' => [
+      'variables' => [
+        'title' => NULL,
+        'view_id' => NULL,
+        'display_id' => NULL,
+      ],
+      'template' => 'menu-link-view-placeholder',
+    ],
+  ];
+}
+
+/**
+ * Implements hook_entity_type_build().
+ */
+function menu_link_view_entity_type_build(array &$entity_types) {
+  // Add a constraint to the menu_link_content entity to prevent adding children to view-based menu items.
+  if (isset($entity_types['menu_link_content'])) {
+    $constraints = $entity_types['menu_link_content']->getConstraints();
+    $constraints['MenuLinkViewParentConstraint'] = [];
+    $entity_types['menu_link_content']->setConstraints($constraints);
+  }
+}
+
+/**
+ * Implements hook_views_pre_build().
+ */
+function menu_link_view_views_pre_build(ViewExecutable $view) {
+  // Add caching metadata for views used in menu links
+  if ($view->getDisplay()->getPluginId() === 'entity_reference') {
+    $view->element['#cache']['tags'][] = 'menu_link_view';
+  }
+}
+
+/**
+ * Implements hook_preprocess_menu().
+ */
+function menu_link_view_preprocess_menu(&$variables) {
+  if (!empty($variables['items'])) {
+    \Drupal::service('menu_link_view.expander')->expandMenuItems($variables['items']);
+  }
 }

@@ -1,5 +1,6 @@
-menu_link_view.add_action:
+menu_link_view.add_link:
   route_name: menu_link_view.add
-  title: 'Add dynamic view menu item'
+  title: "Add view menu link"
   appears_on:
     - entity.menu.edit_form
+  class: Drupal\Core\Menu\LocalActionDefault

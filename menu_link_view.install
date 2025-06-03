@@ -1,9 +1,65 @@
 <?php
 
 /**
- * Implements hook_update_N().
+ * @file
+ * Install, update and uninstall functions for the menu_link_view module.
  */
-function menu_link_view_update_8101() {
-  $entity_type = \Drupal::entityTypeManager()->getDefinition('menu_link_view');
-  \Drupal::entityDefinitionUpdateManager()->installEntityType($entity_type);
+
+use Drupal\Core\Field\BaseFieldDefinition;
+
+/**
+ * Implements hook_install().
+ */
+function menu_link_view_install() {
+  // Add new fields to the menu_link_content entity type.
+  $fields = _menu_link_view_get_fields();
+  foreach ($fields as $name => $field) {
+    \Drupal::entityDefinitionUpdateManager()->installFieldStorageDefinition(
+      $name,
+      'menu_link_content',
+      'menu_link_view',
+      $field
+    );
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function menu_link_view_uninstall() {
+  // Remove fields when uninstalling the module.
+  $fields = _menu_link_view_get_fields();
+  $entity_definition_update_manager = \Drupal::entityDefinitionUpdateManager();
+
+  foreach (array_keys($fields) as $field_name) {
+    $field = $entity_definition_update_manager->getFieldStorageDefinition($field_name, 'menu_link_content');
+    if ($field) {
+      $entity_definition_update_manager->uninstallFieldStorageDefinition($field);
+    }
+  }
+}
+
+/**
+ * Get field definitions for menu_link_view module.
+ *
+ * @return \Drupal\Core\Field\BaseFieldDefinition[]
+ *   An array of base field definitions.
+ */
+function _menu_link_view_get_fields() {
+  $fields = [];
+
+  $fields['view_reference'] = BaseFieldDefinition::create('string')
+    ->setLabel(t('View reference'))
+    ->setDescription(t('The view and display ID for dynamic menu links.'))
+    ->setSettings([
+      'max_length' => 255,
+      'is_ascii' => TRUE,
+    ]);
+
+  $fields['is_view_reference'] = BaseFieldDefinition::create('boolean')
+    ->setLabel(t('Is view reference'))
+    ->setDescription(t('Whether this menu link is a view reference.'))
+    ->setDefaultValue(FALSE);
+
+  return $fields;
 }

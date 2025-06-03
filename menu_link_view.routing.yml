@@ -1,7 +1,35 @@
 menu_link_view.add:
-  path: '/admin/structure/menu-link-view/add'
+  path: "/admin/structure/menu/view-link/{menu}"
   defaults:
-    _form: '\Drupal\menu_link_view\Form\MenuLinkViewAddForm'
-    _title: 'Add dynamic view menu item'
+    _controller: 'Drupal\menu_link_view\Controller\MenuLinkViewController::addForm'
+    _title: "Add view menu link"
   requirements:
-    _permission: 'administer menu link view'
+    _permission: "administer menu"
+  options:
+    parameters:
+      menu:
+        type: entity:menu
+
+menu_link_view.edit:
+  path: "/admin/structure/menu/view-link/{menu_link_view}/edit"
+  defaults:
+    _entity_form: "menu_link_view.default"
+    _title: "Edit view menu link"
+  requirements:
+    _entity_access: "menu_link_view.update"
+  options:
+    parameters:
+      menu_link_view:
+        type: entity:menu_link_view
+
+menu_link_view.delete:
+  path: "/admin/structure/menu/view-link/{menu_link_view}/delete"
+  defaults:
+    _entity_form: "menu_link_view.delete"
+    _title: "Delete view menu link"
+  requirements:
+    _entity_access: "menu_link_view.delete"
+  options:
+    parameters:
+      menu_link_view:
+        type: entity:menu_link_view

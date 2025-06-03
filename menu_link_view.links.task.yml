@@ -1,0 +1,4 @@
+entity.menu_link_view.collection:
+  title: "View-based Links"
+  route_name: entity.menu_link_view.collection
+  base_route: entity.menu.collection
