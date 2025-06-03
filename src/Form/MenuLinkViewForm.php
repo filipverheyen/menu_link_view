@@ -109,18 +109,22 @@ class MenuLinkViewForm extends EntityForm {
       '#description' => $this->t('Select a view with an entity reference display.'),
     ];
 
-    // Get the menu parent options.
-    $menu_name = $menu_link_view->getMenuName() ?: $form_state->getValue('menu_name');
-    $parent = $menu_link_view->getParent() ?: '';
+    // Only show menu parent selection if not in the add form from a menu context.
+    if (get_class($this) == MenuLinkViewForm::class) {
+      // Get the menu parent options.
+      $menu_name = $menu_link_view->getMenuName() ?: 'main';
+      $parent = $menu_link_view->getParent() ?: '';
+      $parent_element = $menu_name . ':' . $parent;
 
-    $form['menu_parent'] = $this->menuParentSelector->parentSelectElement(
-      $menu_name ? $menu_name . ':' . $parent : '',
-      $menu_link_view->id(),
-      ['menu_link_view' => FALSE]
-    );
-    $form['menu_parent']['#title'] = $this->t('Parent link');
-    $form['menu_parent']['#description'] = $this->t('The parent menu link of this menu link. View menu links cannot have children.');
-    $form['menu_parent']['#attributes']['class'][] = 'menu-parent-select';
+      $form['menu_parent'] = $this->menuParentSelector->parentSelectElement(
+        $parent_element,
+        $menu_link_view->id(),
+        ['menu_link_view' => FALSE]
+      );
+      $form['menu_parent']['#title'] = $this->t('Parent link');
+      $form['menu_parent']['#description'] = $this->t('The parent menu link of this menu link. View menu links cannot have children.');
+      $form['menu_parent']['#attributes']['class'][] = 'menu-parent-select';
+    }
 
     $form['weight'] = [
       '#type' => 'weight',
@@ -184,8 +188,8 @@ class MenuLinkViewForm extends EntityForm {
       }
     }
 
-    // Extract menu parent information.
-    if ($form_state->getValue('menu_parent')) {
+    // Extract menu parent information only if that field is present.
+    if ($form_state->hasValue('menu_parent')) {
       [$menu_name, $parent] = explode(':', $form_state->getValue('menu_parent'));
       $form_state->setValue('menu_name', $menu_name);
       $form_state->setValue('parent', $parent);
@@ -205,8 +209,10 @@ class MenuLinkViewForm extends EntityForm {
     $entity->setDisplayId($display_id);
 
     // Set menu information.
-    $entity->setMenuName($form_state->getValue('menu_name'));
-    $entity->setParent($form_state->getValue('parent'));
+    if ($form_state->hasValue('menu_name')) {
+      $entity->setMenuName($form_state->getValue('menu_name'));
+      $entity->setParent($form_state->getValue('parent'));
+    }
 
     $status = $entity->save();
 
@@ -218,7 +224,7 @@ class MenuLinkViewForm extends EntityForm {
       $this->messenger()->addStatus($this->t('Saved the %label Menu link view.', $args));
     }
 
-    // Redirect to the menu edit form instead of the collection.
+    // Redirect to the menu edit form.
     $form_state->setRedirectUrl(Url::fromRoute('entity.menu.edit_form', ['menu' => $entity->getMenuName()]));
   }
 

@@ -16,6 +16,7 @@ use Drupal\menu_link_view\MenuLinkViewInterface;
  *     "list_builder" = "Drupal\menu_link_view\MenuLinkViewListBuilder",
  *     "form" = {
  *       "default" = "Drupal\menu_link_view\Form\MenuLinkViewForm",
+ *       "add" = "Drupal\menu_link_view\Form\MenuLinkViewAddForm",
  *       "delete" = "Drupal\menu_link_view\Form\MenuLinkViewDeleteForm"
  *     },
  *     "route_provider" = {

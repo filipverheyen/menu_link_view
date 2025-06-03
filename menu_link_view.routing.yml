@@ -1,8 +1,8 @@
 menu_link_view.add:
   path: "/admin/structure/menu/view-link/{menu}"
   defaults:
-    _controller: 'Drupal\menu_link_view\Controller\MenuLinkViewController::addForm'
     _title: "Add view menu link"
+    _form: 'Drupal\menu_link_view\Form\MenuLinkViewAddForm'
   requirements:
     _permission: "administer menu"
   options:
@@ -33,3 +33,11 @@ menu_link_view.delete:
     parameters:
       menu_link_view:
         type: entity:menu_link_view
+
+menu_link_view.collection:
+  path: "/admin/structure/menu/view-links"
+  defaults:
+    _entity_list: "menu_link_view"
+    _title: "View menu links"
+  requirements:
+    _permission: "administer menu"
