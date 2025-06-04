@@ -5,6 +5,7 @@ namespace Drupal\menu_link_view\Plugin\Menu;
 use Drupal\Core\Menu\MenuLinkBase;
 use Drupal\Core\Menu\StaticMenuLinkOverridesInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
 use Drupal\Core\Url;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -17,6 +18,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  * )
  */
 class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInterface {
+  use StringTranslationTrait;
 
   /**
    * The static menu link service.
@@ -256,6 +258,42 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
    */
   public function isResettable() {
     return FALSE;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getCacheContexts() {
+    return ['url.path.is_admin'];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getCacheTags() {
+    $entity_id = $this->extractEntityIdFromPluginId();
+    return ['config:menu_link_view.menu_link_view.' . $entity_id];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getManipulationPluginId() {
+    return $this->getPluginId();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function inActiveTrail() {
+    return FALSE;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getTranslatedTitle() {
+    return $this->t('@title', ['@title' => $this->getTitle()]);
   }
 
 }
