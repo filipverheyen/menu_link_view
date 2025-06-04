@@ -251,4 +251,11 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
     return \Drupal::service('router.admin_context')->isAdminRoute();
   }
 
+  /**
+   * {@inheritdoc}
+   */
+  public function isResettable() {
+    return FALSE;
+  }
+
 }
