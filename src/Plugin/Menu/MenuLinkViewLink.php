@@ -9,7 +9,7 @@ use Drupal\Core\Url;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
- * Defines menu links provided by the menu_link_view module.
+ * Provides a custom menu link for view references.
  *
  * @MenuLink(
  *   id = "menu_link_view",
@@ -58,57 +58,45 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
    * {@inheritdoc}
    */
   public function getTitle() {
-    $title = $this->pluginDefinition['title'];
-    if ($this->isInAdminContext()) {
-      // In the admin UI, append [View Reference] to make it clear this is a special link.
-      $title .= ' [View Reference]';
-    }
-    return $title;
+    return $this->pluginDefinition['title'] . ($this->isAdminRoute() ? ' [View Reference]' : '');
   }
 
   /**
    * {@inheritdoc}
    */
   public function getDescription() {
-    return $this->pluginDefinition['description'];
+    return $this->pluginDefinition['description'] ?? '';
   }
 
   /**
    * {@inheritdoc}
    */
   public function getRouteName() {
-    // Use <nolink> route for the placeholder item.
     return '<nolink>';
   }
 
   /**
    * {@inheritdoc}
    */
-  public function getUrlObject() {
+  public function getUrlObject($title_attribute = TRUE) {
     return Url::fromRoute('<nolink>');
   }
 
   /**
    * {@inheritdoc}
    */
-  public function getMenuName() {
-    return $this->pluginDefinition['menu_name'];
-  }
-
-  /**
-   * {@inheritdoc}
-   */
   public function isEnabled() {
-    // This retrieves any overridden value for 'enabled'.
+    // Get the enabled state from overrides.
+    // Default to TRUE if not explicitly set to FALSE.
     $enabled = $this->getOverrideValue('enabled');
-    return $enabled === NULL ? TRUE : (bool) $enabled;
+    return $enabled === NULL || $enabled;
   }
 
   /**
    * {@inheritdoc}
    */
   public function isExpanded() {
-    // This retrieves any overridden value for 'expanded'.
+    // Get the expanded state from overrides, default to TRUE for view links.
     $expanded = $this->getOverrideValue('expanded');
     return $expanded === NULL ? TRUE : (bool) $expanded;
   }
@@ -117,7 +105,6 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
    * {@inheritdoc}
    */
   public function getParent() {
-    // This retrieves any overridden value for 'parent'.
     $parent = $this->getOverrideValue('parent');
     return $parent ?? $this->pluginDefinition['parent'];
   }
@@ -126,7 +113,6 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
    * {@inheritdoc}
    */
   public function getWeight() {
-    // This retrieves any overridden value for 'weight'.
     $weight = $this->getOverrideValue('weight');
     return $weight ?? $this->pluginDefinition['weight'];
   }
@@ -134,36 +120,69 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
   /**
    * {@inheritdoc}
    */
-  public function getOptions() {
-    $options = parent::getOptions();
+  public function updateLink(array $new_definition_values, $persist) {
+    // We only want to store values regarding enabled state, weight, expanded, and parent.
+    $overrides = array_intersect_key($new_definition_values, [
+      'parent' => 1,
+      'weight' => 1,
+      'expanded' => 1,
+      'enabled' => 1,
+    ]);
 
-    // Add special class for styling.
-    $options['attributes']['class'][] = 'menu-link-view';
-
-    if ($this->isInAdminContext()) {
-      $options['attributes']['class'][] = 'menu-link-view-admin';
+    if ($persist) {
+      try {
+        $plugin_id = $this->getPluginId();
+        if (is_string($plugin_id) && !empty($plugin_id)) {
+          $this->staticOverride->saveOverride($plugin_id, $overrides);
+        }
+      }
+      catch (\Exception $e) {
+        \Drupal::logger('menu_link_view')->error('Error saving override: @message', [
+          '@message' => $e->getMessage(),
+        ]);
+      }
     }
 
-    return $options;
+    // Update the plugin definition for this instance.
+    $this->pluginDefinition = array_merge($this->pluginDefinition, $overrides);
+    return $this->pluginDefinition;
   }
 
   /**
    * {@inheritdoc}
    */
-  public function updateLink(array $new_definition_values, $persist) {
-    $overrides = array_intersect_key($new_definition_values, [
-      'weight' => 1,
-      'expanded' => 1,
-      'parent' => 1,
-      'enabled' => 1,
-    ]);
+  public function getEditRoute() {
+    $entity_id = $this->extractEntityIdFromPluginId();
+    if ($entity_id) {
+      return new Url('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]);
+    }
+    return NULL;
+  }
 
-    if ($persist) {
-      $this->staticOverride->saveOverride($this->getPluginId(), $overrides);
+  /**
+   * {@inheritdoc}
+   */
+  public function getDeleteRoute() {
+    $entity_id = $this->extractEntityIdFromPluginId();
+    if ($entity_id) {
+      return new Url('entity.menu_link_view.delete_form', ['menu_link_view' => $entity_id]);
+    }
+    return NULL;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getOptions() {
+    $options = parent::getOptions();
+    $options['attributes']['class'][] = 'menu-link-view';
+
+    // Add specific class when in admin route.
+    if ($this->isAdminRoute()) {
+      $options['attributes']['class'][] = 'menu-link-view-admin';
     }
 
-    $this->pluginDefinition = array_merge($this->pluginDefinition, $overrides);
-    return $this->pluginDefinition;
+    return $options;
   }
 
   /**
@@ -177,32 +196,7 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
    * {@inheritdoc}
    */
   public function deleteLink() {
-    // Nothing to do here since the entity deletion will handle this.
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getTranslateRoute() {
-    return NULL;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getEditRoute() {
-    return new Url('entity.menu_link_view.edit_form', [
-      'menu_link_view' => str_replace('menu_link_view:', '', $this->getPluginId()),
-    ]);
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getDeleteRoute() {
-    return new Url('entity.menu_link_view.delete_form', [
-      'menu_link_view' => str_replace('menu_link_view:', '', $this->getPluginId()),
-    ]);
+    // Nothing to do here, the entity will be deleted separately.
   }
 
   /**
@@ -215,18 +209,45 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
    *   The override value or NULL if no override exists.
    */
   protected function getOverrideValue($key) {
-    $overrides = $this->staticOverride->getOverride($this->getPluginId());
+    $overrides = [];
+
+    try {
+      $plugin_id = $this->getPluginId();
+      if (is_string($plugin_id) && !empty($plugin_id)) {
+        $overrides = $this->staticOverride->loadOverride($plugin_id) ?: [];
+      }
+    }
+    catch (\Exception $e) {
+      \Drupal::logger('menu_link_view')->error('Error loading override: @message', [
+        '@message' => $e->getMessage(),
+      ]);
+      $overrides = [];
+    }
+
     return $overrides[$key] ?? NULL;
   }
 
   /**
-   * Determines if we're in an admin context.
+   * Extracts the entity ID from the plugin ID.
+   *
+   * @return string|null
+   *   The entity ID, or NULL if it could not be extracted.
+   */
+  protected function extractEntityIdFromPluginId() {
+    $plugin_id = $this->getPluginId();
+    if (is_string($plugin_id) && strpos($plugin_id, 'menu_link_view:') === 0) {
+      return substr($plugin_id, strlen('menu_link_view:'));
+    }
+    return NULL;
+  }
+
+  /**
+   * Checks if we're on an admin route.
    *
    * @return bool
-   *   TRUE if we're in an admin context, FALSE otherwise.
+   *   TRUE if we're on an admin route, FALSE otherwise.
    */
-  protected function isInAdminContext() {
-    // Use the route admin context service to check if we're in admin context.
+  protected function isAdminRoute() {
     return \Drupal::service('router.admin_context')->isAdminRoute();
   }
 

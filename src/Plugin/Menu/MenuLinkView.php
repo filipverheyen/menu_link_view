@@ -1,135 +1,245 @@
 <?php
 
-namespace Drupal\menu_link_view\Plugin\Menu;
+namespace Drupal\menu_link_view\Entity;
 
-use Drupal\Core\Menu\MenuLinkDefault;
-use Drupal\Core\Menu\StaticMenuLinkOverridesInterface;
-use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
-use Symfony\Component\DependencyInjection\ContainerInterface;
+use Drupal\Core\Config\Entity\ConfigEntityBase;
+use Drupal\Core\Entity\EntityStorageInterface;
+use Drupal\menu_link_view\MenuLinkViewInterface;
 
 /**
- * Defines menu links provided by the menu_link_view module.
+ * Defines the Menu link view entity.
  *
- * @MenuLinkDefault(
+ * @ConfigEntityType(
  *   id = "menu_link_view",
- *   deriver = "Drupal\menu_link_view\Plugin\Derivative\MenuLinkViewDerivative"
+ *   label = @Translation("Menu link view"),
+ *   handlers = {
+ *     "list_builder" = "Drupal\menu_link_view\MenuLinkViewListBuilder",
+ *     "form" = {
+ *       "default" = "Drupal\menu_link_view\Form\MenuLinkViewForm",
+ *       "add" = "Drupal\menu_link_view\Form\MenuLinkViewAddForm",
+ *       "edit" = "Drupal\menu_link_view\Form\MenuLinkViewForm",
+ *       "delete" = "Drupal\menu_link_view\Form\MenuLinkViewDeleteForm"
+ *     },
+ *     "route_provider" = {
+ *       "html" = "Drupal\Core\Entity\Routing\AdminHtmlRouteProvider",
+ *     }
+ *   },
+ *   config_prefix = "menu_link_view",
+ *   admin_permission = "administer menu",
+ *   entity_keys = {
+ *     "id" = "id",
+ *     "uuid" = "uuid",
+ *     "label" = "title"
+ *   },
+ *   links = {
+ *     "canonical" = "/admin/structure/menu/view-link/{menu_link_view}",
+ *     "edit-form" = "/admin/structure/menu/view-link/{menu_link_view}/edit",
+ *     "delete-form" = "/admin/structure/menu/view-link/{menu_link_view}/delete",
+ *     "collection" = "/admin/structure/menu/view-links"
+ *   },
+ *   config_export = {
+ *     "id",
+ *     "title",
+ *     "view_id",
+ *     "display_id",
+ *     "menu_name",
+ *     "parent",
+ *     "weight",
+ *     "description"
+ *   }
  * )
  */
-class MenuLinkViewLink extends MenuLinkDefault implements ContainerFactoryPluginInterface {
+class MenuLinkView extends ConfigEntityBase implements MenuLinkViewInterface {
 
   /**
-   * The static menu link service.
+   * The Menu link view ID.
    *
-   * @var \Drupal\Core\Menu\StaticMenuLinkOverridesInterface
+   * @var string
    */
-  protected $staticOverride;
+  protected $id;
 
   /**
-   * Constructs a new MenuLinkViewLink.
+   * The Menu link view title.
    *
-   * @param array $configuration
-   *   A configuration array containing information about the plugin instance.
-   * @param string $plugin_id
-   *   The plugin_id for the plugin instance.
-   * @param mixed $plugin_definition
-   *   The plugin implementation definition.
-   * @param \Drupal\Core\Menu\StaticMenuLinkOverridesInterface $static_override
-   *   The static menu link override service.
+   * @var string
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, StaticMenuLinkOverridesInterface $static_override) {
-    parent::__construct($configuration, $plugin_id, $plugin_definition);
-    $this->staticOverride = $static_override;
+  protected $title;
+
+  /**
+   * The View ID.
+   *
+   * @var string
+   */
+  protected $view_id;
+
+  /**
+   * The View display ID.
+   *
+   * @var string
+   */
+  protected $display_id;
+
+  /**
+   * The menu name.
+   *
+   * @var string
+   */
+  protected $menu_name;
+
+  /**
+   * The parent menu link plugin ID.
+   *
+   * @var string
+   */
+  protected $parent = '';
+
+  /**
+   * The weight of the menu link.
+   *
+   * @var int
+   */
+  protected $weight = 0;
+
+  /**
+   * The description of the menu link.
+   *
+   * @var string
+   */
+  protected $description = '';
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getViewId() {
+    return $this->view_id;
   }
 
   /**
    * {@inheritdoc}
    */
-  public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
-    return new static(
-      $configuration,
-      $plugin_id,
-      $plugin_definition,
-      $container->get('menu_link.static.overrides')
-    );
+  public function setViewId($view_id) {
+    $this->view_id = $view_id;
+    return $this;
   }
 
   /**
    * {@inheritdoc}
    */
-  public function getTitle() {
-    if ($this->isInAdminContext()) {
-      // In the admin UI, append [View Reference] to make it clear this is a special link.
-      return $this->pluginDefinition['title'] . ' [View Reference]';
-    }
-    return $this->pluginDefinition['title'];
+  public function getDisplayId() {
+    return $this->display_id;
   }
 
   /**
    * {@inheritdoc}
    */
-  public function getOptions() {
-    $options = parent::getOptions();
-
-    // Add special class for styling.
-    $options['attributes']['class'][] = 'menu-link-view';
-
-    if ($this->isInAdminContext()) {
-      $options['attributes']['class'][] = 'menu-link-view-admin';
-    }
-
-    return $options;
+  public function setDisplayId($display_id) {
+    $this->display_id = $display_id;
+    return $this;
   }
 
   /**
    * {@inheritdoc}
    */
-  public function getRouteName() {
-    // Use <nolink> route for the placeholder item.
-    return '<nolink>';
+  public function getMenuName() {
+    return $this->menu_name;
   }
 
   /**
    * {@inheritdoc}
    */
-  public function updateLink(array $new_definition_values, $persist) {
-    $overrides = array_intersect_key($new_definition_values, [
-      'weight' => 1,
-      'expanded' => 1,
-      'parent' => 1,
-      'enabled' => 1,
+  public function setMenuName($menu_name) {
+    $this->menu_name = $menu_name;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getParent() {
+    return $this->parent;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function setParent($parent) {
+    $this->parent = $parent;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getWeight() {
+    return $this->weight;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function setWeight($weight) {
+    $this->weight = $weight;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getDescription() {
+    return $this->description;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function setDescription($description) {
+    $this->description = $description;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getCacheTagsToInvalidate() {
+    return array_merge(parent::getCacheTagsToInvalidate(), [
+      'menu:' . $this->getMenuName(),
+      'config:system.menu.' . $this->getMenuName(),
     ]);
+  }
 
-    if ($persist) {
-      $this->staticOverride->saveOverride($this->getPluginId(), $overrides);
+  /**
+   * {@inheritdoc}
+   */
+  public function postSave(EntityStorageInterface $storage, $update = TRUE) {
+    parent::postSave($storage, $update);
+
+    // Rebuild the menu link plugin definitions.
+    \Drupal::service('plugin.manager.menu.link')->rebuild();
+
+    // Clear menu cache tags.
+    \Drupal::service('cache_tags.invalidator')->invalidateTags([
+      'menu:' . $this->getMenuName(),
+      'config:system.menu.' . $this->getMenuName(),
+      'menu_link_content',
+    ]);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function postDelete(EntityStorageInterface $storage, array $entities) {
+    parent::postDelete($storage, $entities);
+
+    // Rebuild the menu link plugin definitions.
+    \Drupal::service('plugin.manager.menu.link')->rebuild();
+
+    // Clear menu cache tags.
+    $tags = [];
+    foreach ($entities as $entity) {
+      $tags[] = 'menu:' . $entity->getMenuName();
+      $tags[] = 'config:system.menu.' . $entity->getMenuName();
     }
-
-    $this->pluginDefinition = array_merge($this->pluginDefinition, $overrides);
-    return $this->pluginDefinition;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function isDeletable() {
-    return TRUE;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function deleteLink() {
-    // Nothing to do here since the entity deletion will handle this.
-  }
-
-  /**
-   * Determines if we're in an admin context.
-   *
-   * @return bool
-   *   TRUE if we're in an admin context, FALSE otherwise.
-   */
-  protected function isInAdminContext() {
-    // Use the route admin context service to check if we're in admin context.
-    return \Drupal::service('router.admin_context')->isAdminRoute();
+    \Drupal::service('cache_tags.invalidator')->invalidateTags($tags);
   }
 
 }

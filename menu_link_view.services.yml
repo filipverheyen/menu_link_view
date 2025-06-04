@@ -1,9 +1,4 @@
 services:
   menu_link_view.expander:
     class: Drupal\menu_link_view\MenuLinkViewExpander
-    arguments:
-      - "@entity_type.manager"
-      - "@views.executable"
-      - "@cache.default"
-      - "@renderer"
-      - "@router.admin_context"
+    arguments: ["@entity_type.manager", "@menu.link_tree"]
