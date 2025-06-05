@@ -12,6 +12,6 @@ menu-admin:
     theme:
       css/menu_link_view.admin.css: {}
   dependencies:
-    - core/jquery
     - core/drupal
     - core/once
+    - core/jquery

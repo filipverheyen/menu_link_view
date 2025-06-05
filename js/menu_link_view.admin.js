@@ -1,8 +1,12 @@
 /**
  * @file
  * JavaScript behaviors for menu link view administration.
+ *
+ * Updated: 2025-06-05
+ * By: filipverheyen
+ * Drupal 11 compatible
  */
-(function ($, Drupal) {
+(function (Drupal, once, $) {
   "use strict";
 
   /**
@@ -10,48 +14,72 @@
    */
   Drupal.behaviors.menuLinkViewAdmin = {
     attach: function (context, settings) {
-      // Find all view menu items
-      const viewMenuItems = $(".menu-link-view-item", context);
+      // Find all view menu items - use Drupal's once() instead of jQuery's once()
+      once("menu-link-view-admin", ".menu-link-view-item", context).forEach(
+        function (element) {
+          // Add class for styling
+          element.classList.add("no-child-allowed");
 
-      // Make them invalid drop targets
-      viewMenuItems.once("menu-link-view-admin").each(function () {
-        // Add class for styling
-        $(this).addClass("no-child-allowed");
+          // Listen for drag events and prevent dropping
+          element.addEventListener("dragover", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+          });
 
-        // Listen for drag events and prevent dropping
-        $(this).on("dragover", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          return false;
-        });
+          // Indicate visually that dropping is not allowed
+          element.addEventListener("dragenter", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            element.classList.add("drop-not-allowed");
+            return false;
+          });
 
-        // Indicate visually that dropping is not allowed
-        $(this).on("dragenter", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          $(this).addClass("drop-not-allowed");
-          return false;
-        });
+          element.addEventListener("dragleave", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            element.classList.remove("drop-not-allowed");
+            return false;
+          });
 
-        $(this).on("dragleave", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          $(this).removeClass("drop-not-allowed");
-          return false;
-        });
+          // Prevent actual drop
+          element.addEventListener("drop", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            element.classList.remove("drop-not-allowed");
+            return false;
+          });
 
-        // Prevent actual drop
-        $(this).on("drop", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          $(this).removeClass("drop-not-allowed");
-          return false;
-        });
-      });
+          // If operations get added after page load (AJAX), hide any add operation
+          const observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+              if (mutation.addedNodes.length > 0) {
+                // Check for any newly added operation links
+                const addLink = element.querySelector(
+                  '.dropbutton-wrapper a[href*="add"]'
+                );
+                if (addLink) {
+                  const listItem = addLink.closest("li");
+                  if (listItem) {
+                    listItem.style.display = "none";
+                  }
+                }
+              }
+            });
+          });
+
+          // Start observing the element for changes
+          observer.observe(element, {
+            childList: true,
+            subtree: true,
+          });
+        }
+      );
 
       // Update Drupal's Tabledrag to recognize our special items
       if (
         Drupal.tableDrag &&
+        Drupal.tableDrag.prototype.row &&
         Drupal.tableDrag.prototype.row.prototype.findTargetForNewLevel
       ) {
         const originalFindTarget =
@@ -62,7 +90,7 @@
             const target = originalFindTarget.apply(this, arguments);
 
             // If target is a view menu item, return null to prevent dropping
-            if (target && $(target).hasClass("menu-link-view-item")) {
+            if (target && target.classList.contains("menu-link-view-item")) {
               return null;
             }
 
@@ -71,4 +99,4 @@
       }
     },
   };
-})(jQuery, Drupal);
+})(Drupal, once, jQuery);

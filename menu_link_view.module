@@ -3,6 +3,10 @@
 /**
  * @file
  * Contains menu_link_view.module.
+ *
+ * Updated: 2025-06-05
+ * By: filipverheyen
+ * Drupal 11 compatible implementation
  */
 
 use Drupal\Core\Routing\RouteMatchInterface;
@@ -13,6 +17,8 @@ use Drupal\Core\Url;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Component\Utility\Html;
+use Drupal\Core\Render\Element;
 
 /**
  * Implements hook_help().
@@ -28,95 +34,52 @@ function menu_link_view_help($route_name, RouteMatchInterface $route_match) {
 }
 
 /**
- * Implements hook_entity_operation_alter().
+ * Implements hook_entity_operation().
+ *
+ * In Drupal 11, this is preferred over hook_entity_operation_alter().
  */
-function menu_link_view_entity_operation_alter(array &$operations, EntityInterface $entity) {
+function menu_link_view_entity_operation(EntityInterface $entity) {
+  $operations = [];
+
   if ($entity->getEntityTypeId() == 'menu_link_content') {
-    // Check if this is one of our special view menu items
     $options = $entity->get('link')->options ?? [];
     if (!empty($options['menu_link_view']) && !empty($options['menu_link_view']['entity_id'])) {
       $entity_id = $options['menu_link_view']['entity_id'];
 
-      // Replace edit operation to point to our custom entity
-      if (isset($operations['edit'])) {
-        $operations['edit']['url'] = Url::fromRoute(
-          'entity.menu_link_view.edit_form',
-          ['menu_link_view' => $entity_id]
-        );
-        $operations['edit']['title'] = t('Edit view link');
-      }
+      // Provide our operations directly
+      $operations['edit'] = [
+        'title' => t('Edit view link'),
+        'weight' => 10,
+        'url' => Url::fromRoute('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]),
+      ];
 
-      // Replace delete operation to ensure both entities are deleted
-      if (isset($operations['delete'])) {
-        $operations['delete']['url'] = Url::fromRoute(
-          'entity.menu_link_view.delete_form',
-          ['menu_link_view' => $entity_id]
-        );
-      }
-
-      // Remove translate operation if it exists
-      if (isset($operations['translate'])) {
-        unset($operations['translate']);
-      }
+      $operations['delete'] = [
+        'title' => t('Delete view link'),
+        'weight' => 100,
+        'url' => Url::fromRoute('entity.menu_link_view.delete_form', ['menu_link_view' => $entity_id]),
+      ];
     }
   }
+
+  return $operations;
 }
 
 /**
- * Implements hook_menu_local_tasks_alter().
+ * Implements hook_menu_local_actions_alter().
+ *
+ * In Drupal 11, we use this to modify the action buttons that appear above the content.
  */
-function menu_link_view_menu_local_tasks_alter(&$data, $route_name) {
-  // For menu link content canonical view (detail page)
+function menu_link_view_menu_local_actions_alter(&$local_actions) {
+  $route_name = \Drupal::routeMatch()->getRouteName();
+
   if ($route_name === 'entity.menu_link_content.canonical') {
     $menu_link = \Drupal::routeMatch()->getParameter('menu_link_content');
     if ($menu_link) {
       $options = $menu_link->get('link')->options ?? [];
       if (!empty($options['menu_link_view'])) {
-        // Remove the "Add child" link completely
-        foreach ($data['tabs'] as $key => $tabs) {
-          foreach ($tabs as $tab_key => $tab) {
-            if (isset($tab['#link']['url']) && $tab['#link']['url']->getRouteName() === 'entity.menu_link_content.add_form') {
-              unset($data['tabs'][$key][$tab_key]);
-            }
-          }
-        }
-
-        // Redirect to our entity
-        $entity_id = $options['menu_link_view']['entity_id'];
-        $url = Url::fromRoute('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]);
-        $response = new \Symfony\Component\HttpFoundation\RedirectResponse($url->toString());
-        $response->send();
-        exit;
-      }
-    }
-  }
-}
-
-
-/**
- * Implements hook_contextual_links_alter().
- */
-function menu_link_view_contextual_links_alter(array &$links, $group, array $route_parameters) {
-  // Remove contextual links for adding children to our menu view items
-  if ($group === 'menu_link_content' && !empty($route_parameters['menu_link_content'])) {
-    $menu_link = \Drupal::entityTypeManager()
-      ->getStorage('menu_link_content')
-      ->load($route_parameters['menu_link_content']);
-
-    if ($menu_link) {
-      $options = $menu_link->get('link')->options ?? [];
-      if (!empty($options['menu_link_view'])) {
-        // Remove add child contextual link
-        if (isset($links['menu_link_content_add_child'])) {
-          unset($links['menu_link_content_add_child']);
-        }
-
-        // Replace edit link with our custom entity edit
-        if (isset($links['menu_link_content_edit_form'])) {
-          $entity_id = $options['menu_link_view']['entity_id'];
-          $links['menu_link_content_edit_form']['route_name'] = 'entity.menu_link_view.edit_form';
-          $links['menu_link_content_edit_form']['route_parameters'] = ['menu_link_view' => $entity_id];
-          $links['menu_link_content_edit_form']['title'] = t('Edit view link');
+        // Remove the "Add child" action if it exists
+        if (isset($local_actions['entity.menu_link_content.add_form'])) {
+          unset($local_actions['entity.menu_link_content.add_form']);
         }
       }
     }
@@ -127,7 +90,6 @@ function menu_link_view_contextual_links_alter(array &$links, $group, array $rou
  * Implements hook_form_alter().
  */
 function menu_link_view_form_alter(&$form, FormStateInterface $form_state, $form_id) {
-  // Check if this is the menu edit form (with draggable items)
   if ($form_id == 'menu_edit_form') {
     // Add our custom JS to prevent children for view items
     $form['#attached']['library'][] = 'menu_link_view/menu-admin';
@@ -135,86 +97,111 @@ function menu_link_view_form_alter(&$form, FormStateInterface $form_state, $form
     // Add our custom validate handler to prevent children server-side
     $form['#validate'][] = 'menu_link_view_menu_edit_form_validate';
 
-    // Process all items in the draggable list
-    if (!empty($form['links']['links'])) {
-      foreach ($form['links']['links'] as $key => &$item) {
-        // Skip non-item array elements
-        if (strpos($key, '#') === 0) {
-          continue;
-        }
+    // In Drupal 11, operations are built differently, we need to use #process
+    // to alter them after they're built by the form API
+    $form['links']['links']['#process'][] = 'menu_link_view_process_menu_links';
+  }
 
-        // Check if this is a view menu item by looking at the title
-        if (isset($item['title']['#markup']) && strpos($item['title']['#markup'], '[View]') !== FALSE) {
-          // Extract the menu_link_content entity from the form item
-          if (isset($item['#item'])) {
-            $plugin_id = $item['#item']->getPluginId();
-            if (strpos($plugin_id, 'menu_link_content:') === 0) {
-              $uuid = substr($plugin_id, strlen('menu_link_content:'));
+  // For menu link content forms, prevent editing for our view items
+  if ($form_id === 'menu_link_content_menu_link_content_form' && isset($form['#entity'])) {
+    $menu_link = $form['#entity'];
+    $options = $menu_link->get('link')->options ?? [];
 
-              // Get the menu_link_content entity
-              $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
-              $entities = $storage->loadByProperties(['uuid' => $uuid]);
-              $menu_link = reset($entities);
+    if (!empty($options['menu_link_view'])) {
+      // Add message explaining the redirect
+      \Drupal::messenger()->addWarning(t('This menu item is a View reference and needs to be edited through the View Link interface.'));
 
-              if ($menu_link) {
-                $options = $menu_link->get('link')->options ?? [];
-                if (!empty($options['menu_link_view']) && !empty($options['menu_link_view']['entity_id'])) {
-                  $entity_id = $options['menu_link_view']['entity_id'];
+      // Redirect to our custom form
+      $entity_id = $options['menu_link_view']['entity_id'];
+      $url = Url::fromRoute('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]);
+      $response = new \Symfony\Component\HttpFoundation\RedirectResponse($url->toString());
+      $response->send();
+      exit;
+    }
+  }
+}
 
-                  // Add a special class to identify view items
-                  $item['#attributes']['class'][] = 'menu-link-view-item';
-                  $item['#attributes']['data-menu-link-view'] = 'true';
+/**
+ * Process callback for menu links in the menu edit form.
+ *
+ * This is a Drupal 11 approach to modify the operations for each menu item.
+ */
+function menu_link_view_process_menu_links($element) {
+  // Process all menu items
+  foreach (Element::children($element) as $key) {
+    // Skip non-item array elements
+    if (strpos($key, '#') === 0) {
+      continue;
+    }
 
-                  // IMPORTANT: Handle operations links correctly
-                  if (isset($item['operations'])) {
-                    // Completely remove add operation to prevent adding children
-                    if (isset($item['operations']['add'])) {
-                      unset($item['operations']['add']);
-                    }
+    $item = &$element[$key];
 
-                    // Replace edit operation to point to our custom entity
-                    if (isset($item['operations']['edit'])) {
-                      $item['operations']['edit']['#title'] = t('Edit view link');
-                      $item['operations']['edit']['#url'] = Url::fromRoute(
-                        'entity.menu_link_view.edit_form',
-                        ['menu_link_view' => $entity_id]
-                      );
-                    }
+    // Check if this is a view menu item by looking at the title
+    if (isset($item['title']['#markup']) && strpos($item['title']['#markup'], '[View]') !== FALSE) {
+      // Extract the menu_link_content entity from the form item
+      if (isset($item['#item'])) {
+        $plugin_id = $item['#item']->getPluginId();
+        if (strpos($plugin_id, 'menu_link_content:') === 0) {
+          $uuid = substr($plugin_id, strlen('menu_link_content:'));
 
-                    // Replace delete operation to point to our custom entity
-                    if (isset($item['operations']['delete'])) {
-                      $item['operations']['delete']['#url'] = Url::fromRoute(
-                        'entity.menu_link_view.delete_form',
-                        ['menu_link_view' => $entity_id]
-                      );
-                    }
+          // Get the menu_link_content entity
+          $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+          $entities = $storage->loadByProperties(['uuid' => $uuid]);
+          $menu_link = reset($entities);
 
-                    // Also remove any other operations that don't make sense
-                    if (isset($item['operations']['translate'])) {
-                      unset($item['operations']['translate']);
-                    }
+          if ($menu_link) {
+            $options = $menu_link->get('link')->options ?? [];
+            if (!empty($options['menu_link_view']) && !empty($options['menu_link_view']['entity_id'])) {
+              $entity_id = $options['menu_link_view']['entity_id'];
 
-                    // If using dropbutton widget, modify it as well
-                    if (isset($item['operations']['#type']) && $item['operations']['#type'] === 'dropbutton') {
-                      // Rebuild the list to only include edit and delete
-                      $new_list = [];
+              // Add a special class to identify view items
+              $item['#attributes']['class'][] = 'menu-link-view-item';
+              $item['#attributes']['data-menu-link-view'] = 'true';
 
-                      if (isset($item['operations']['edit'])) {
-                        $new_list['edit'] = $item['operations']['edit'];
-                      }
+              // In Drupal 11, operations are typically rendered through an
+              // operations_dropbutton element
+              if (isset($item['operations']['#type']) && $item['operations']['#type'] === 'operations') {
+                // Remove the add operation
+                if (isset($item['operations']['#links']['add'])) {
+                  unset($item['operations']['#links']['add']);
+                }
 
-                      if (isset($item['operations']['delete'])) {
-                        $new_list['delete'] = $item['operations']['delete'];
-                      }
+                // Replace edit operation
+                if (isset($item['operations']['#links']['edit'])) {
+                  $item['operations']['#links']['edit'] = [
+                    'title' => t('Edit view link'),
+                    'url' => Url::fromRoute('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]),
+                  ];
+                }
 
-                      // Replace with our filtered list
-                      foreach ($item['operations'] as $op_key => $op_value) {
-                        if ($op_key !== 'edit' && $op_key !== 'delete' && strpos($op_key, '#') !== 0) {
-                          unset($item['operations'][$op_key]);
-                        }
-                      }
-                    }
-                  }
+                // Replace delete operation
+                if (isset($item['operations']['#links']['delete'])) {
+                  $item['operations']['#links']['delete']['url'] = Url::fromRoute(
+                    'entity.menu_link_view.delete_form',
+                    ['menu_link_view' => $entity_id]
+                  );
+                }
+              }
+              // For compatibility with both old and new styles
+              elseif (isset($item['operations'])) {
+                // Handle individual operations elements
+                if (isset($item['operations']['add'])) {
+                  unset($item['operations']['add']);
+                }
+
+                if (isset($item['operations']['edit'])) {
+                  $item['operations']['edit']['#title'] = t('Edit view link');
+                  $item['operations']['edit']['#url'] = Url::fromRoute(
+                    'entity.menu_link_view.edit_form',
+                    ['menu_link_view' => $entity_id]
+                  );
+                }
+
+                if (isset($item['operations']['delete'])) {
+                  $item['operations']['delete']['#url'] = Url::fromRoute(
+                    'entity.menu_link_view.delete_form',
+                    ['menu_link_view' => $entity_id]
+                  );
                 }
               }
             }
@@ -224,20 +211,7 @@ function menu_link_view_form_alter(&$form, FormStateInterface $form_state, $form
     }
   }
 
-  // For standard menu operations page, redirect view links to our UI
-  if ($form_id === 'menu_link_content_menu_link_content_form' && isset($form['#entity'])) {
-    $menu_link = $form['#entity'];
-    $options = $menu_link->get('link')->options ?? [];
-
-    if (!empty($options['menu_link_view'])) {
-      // Redirect to our custom form
-      $entity_id = $options['menu_link_view']['entity_id'];
-      $url = Url::fromRoute('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]);
-      $response = new \Symfony\Component\HttpFoundation\RedirectResponse($url->toString());
-      $response->send();
-      exit;
-    }
-  }
+  return $element;
 }
 
 /**
@@ -263,6 +237,7 @@ function menu_link_view_menu_edit_form_validate($form, FormStateInterface $form_
 
   $menu_links = $storage->loadMultiple($ids);
 
+  // Store both plugin ID and actual label for all view menu items
   foreach ($menu_links as $menu_link) {
     $options = $menu_link->get('link')->options ?? [];
     // Only if it's actually a view link item
@@ -275,10 +250,31 @@ function menu_link_view_menu_edit_form_validate($form, FormStateInterface $form_
   // Check if any items are using a view menu item as parent
   foreach ($parents as $id => $item) {
     if (is_string($id) && !empty($item['parent']) && isset($view_menu_items[$item['parent']])) {
+      // Get a clean item title
+      $item_title = '';
+      if (isset($form['links']['links'][$id]['title']['#markup'])) {
+        $item_title = $form['links']['links'][$id]['title']['#markup'];
+      } else {
+        // Try to load the item to get its title
+        if (strpos($id, 'menu_link_content:') === 0) {
+          $uuid = substr($id, strlen('menu_link_content:'));
+          $items = $storage->loadByProperties(['uuid' => $uuid]);
+          $menu_item = reset($items);
+          if ($menu_item) {
+            $item_title = $menu_item->label();
+          }
+        }
+
+        // Fallback to ID if we couldn't get a title
+        if (empty($item_title)) {
+          $item_title = t('Menu item');
+        }
+      }
+
       $form_state->setError(
         $form['links']['links'][$id]['parent'],
         t('The menu item %title cannot be placed under the view menu item %parent because view menu items cannot have children.', [
-          '%title' => $form['links']['links'][$id]['title']['#markup'] ?? $id,
+          '%title' => $item_title,
           '%parent' => $view_menu_items[$item['parent']],
         ])
       );
@@ -480,6 +476,29 @@ function menu_link_view_page_attachments(array &$attachments) {
 }
 
 /**
+ * Implements hook_menu_local_tasks_alter().
+ */
+function menu_link_view_menu_local_tasks_alter(&$data, $route_name) {
+  // Remove add child link from menu view menu items
+  if ($route_name === 'entity.menu_link_content.canonical') {
+    $menu_link = \Drupal::routeMatch()->getParameter('menu_link_content');
+    if ($menu_link) {
+      $options = $menu_link->get('link')->options ?? [];
+      if (!empty($options['menu_link_view'])) {
+        // Remove the "Add child" link
+        foreach ($data['tabs'] as $key => $tabs) {
+          foreach ($tabs as $tab_key => $tab) {
+            if (isset($tab['#link']['url']) && $tab['#link']['url']->getRouteName() === 'entity.menu_link_content.add_form') {
+              unset($data['tabs'][$key][$tab_key]);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
  * Implements hook_entity_access().
  */
 function menu_link_view_entity_access(EntityInterface $entity, $operation, AccountInterface $account) {
@@ -509,51 +528,4 @@ function menu_link_view_entity_access(EntityInterface $entity, $operation, Accou
 
   // Don't change access for other entities
   return AccessResult::neutral();
-}
-
-/**
- * Implements hook_libraries_info().
- */
-function menu_link_view_libraries_info() {
-  $libraries['menu_link_view'] = [
-    'name' => 'Menu Link View',
-    'version' => '1.x',
-  ];
-
-  $libraries['menu-admin'] = [
-    'name' => 'Menu Link View Admin',
-    'version' => '1.x',
-    'js' => [
-      'js/menu_link_view.admin.js' => [],
-    ],
-    'css' => [
-      'css/menu_link_view.admin.css' => [],
-    ],
-    'dependencies' => [
-      'core/jquery',
-      'core/drupal',
-      'core/once',
-    ],
-  ];
-
-  return $libraries;
-}
-
-/**
- * Implements hook_preprocess_menu_local_action().
- */
-function menu_link_view_preprocess_menu_local_action(&$variables) {
-  // For menu link content actions
-  $route_name = $variables['element']['#link']['url']->getRouteName();
-
-  // Hide "Add child" action when viewing a view menu item
-  if ($route_name == 'entity.menu_link_content.add_form') {
-    $menu_link = \Drupal::routeMatch()->getParameter('menu_link_content');
-    if ($menu_link) {
-      $options = $menu_link->get('link')->options ?? [];
-      if (!empty($options['menu_link_view'])) {
-        $variables['attributes']['class'][] = 'hidden';
-      }
-    }
-  }
 }
