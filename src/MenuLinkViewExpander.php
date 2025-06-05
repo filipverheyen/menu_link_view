@@ -3,11 +3,11 @@
 namespace Drupal\menu_link_view;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
-use Drupal\Core\Menu\MenuLinkTreeInterface;
-use Drupal\views\Views;
+use Drupal\Core\Menu\MenuLinkManagerInterface;
+use Drupal\Core\Render\RendererInterface;
 
 /**
- * Menu link view expander service.
+ * Provides a service for expanding menu items with views.
  */
 class MenuLinkViewExpander {
 
@@ -19,131 +19,143 @@ class MenuLinkViewExpander {
   protected $entityTypeManager;
 
   /**
-   * The menu link tree service.
+   * The menu link manager.
    *
-   * @var \Drupal\Core\Menu\MenuLinkTreeInterface
+   * @var \Drupal\Core\Menu\MenuLinkManagerInterface
    */
-  protected $menuLinkTree;
+  protected $menuLinkManager;
+
+  /**
+   * The renderer service.
+   *
+   * @var \Drupal\Core\Render\RendererInterface
+   */
+  protected $renderer;
 
   /**
    * Constructs a new MenuLinkViewExpander.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *   The entity type manager.
-   * @param \Drupal\Core\Menu\MenuLinkTreeInterface $menu_link_tree
-   *   The menu link tree service.
+   * @param \Drupal\Core\Menu\MenuLinkManagerInterface $menu_link_manager
+   *   The menu link manager.
+   * @param \Drupal\Core\Render\RendererInterface $renderer
+   *   The renderer service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, MenuLinkTreeInterface $menu_link_tree) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, MenuLinkManagerInterface $menu_link_manager, RendererInterface $renderer) {
     $this->entityTypeManager = $entity_type_manager;
-    $this->menuLinkTree = $menu_link_tree;
+    $this->menuLinkManager = $menu_link_manager;
+    $this->renderer = $renderer;
   }
 
   /**
-   * Expands menu links based on view results.
+   * Expands menu items with view content.
    *
-   * @param array $tree
-   *   The menu tree.
+   * @param array $items
+   *   The menu items to expand.
    *
    * @return array
-   *   The modified menu tree.
+   *   The expanded menu items.
    */
-  public function expandTree(array $tree) {
-    // Look for menu link view items in the tree and expand them.
-    foreach ($tree as $key => $element) {
-      // Check if this is one of our menu link view elements.
-      if (isset($element->link) && $element->link->getProvider() === 'menu_link_view') {
-        $plugin_id = $element->link->getPluginId();
-
-        // Extract entity ID from plugin ID.
-        $entity_id = str_replace('menu_link_view:', '', $plugin_id);
-        $menu_link_view = $this->entityTypeManager->getStorage('menu_link_view')->load($entity_id);
-
-        if ($menu_link_view) {
-          $view_id = $menu_link_view->getViewId();
-          $display_id = $menu_link_view->getDisplayId();
-
-          // Load and execute the view.
-          $view = Views::getView($view_id);
-          if ($view && $view->access($display_id)) {
-            $view->setDisplay($display_id);
-            $view->execute();
-
-            // Get the view results.
-            $results = [];
-            if (!empty($view->result)) {
-              // Get entity type from view base table.
-              $entity_type = $view->baseEntityType->id();
-              $entity_storage = $this->entityTypeManager->getStorage($entity_type);
-
-              // Get entity IDs from view result.
-              $entity_ids = [];
-              foreach ($view->result as $row) {
-                $entity_ids[] = $row->_entity->id();
-              }
-
-              // Load the entities.
-              if (!empty($entity_ids)) {
-                $entities = $entity_storage->loadMultiple($entity_ids);
-                foreach ($entities as $entity) {
-                  // Create a virtual menu item for each entity.
-                  $results[] = [
-                    'title' => $entity->label(),
-                    'url' => $entity->toUrl(),
-                    'weight' => $element->link->getWeight(),
-                  ];
-                }
-              }
-            }
-
-            // If we have results, add them as children of the view menu link.
-            if (!empty($results)) {
-              // Create a sub-tree of items from the results.
-              $subtree = [];
-              foreach ($results as $index => $item) {
-                // IMPORTANT: Make sure the index is an integer.
-                // Cast to integer to fix the TypeError.
-                $position = (int) $index;
-
-                $subtree[$position] = new \stdClass();
-                $subtree[$position]->link = new ViewResultMenuLink(
-                  $item['title'],
-                  $item['url'],
-                  $element->link->getPluginId() . ':' . $position,
-                  $element->link->getWeight() + ($position / 1000)
-                );
-                $subtree[$position]->subtree = [];
-                $subtree[$position]->depth = $element->depth + 1;
-                $subtree[$position]->inActiveTrail = FALSE;
-                $subtree[$position]->access = TRUE;
-                $subtree[$position]->hasChildren = FALSE;
-                $subtree[$position]->expanded = FALSE;
-              }
-
-              // Insert the subtree into the tree.
-              if (!empty($subtree)) {
-                // Make sure $key is an integer for array_splice.
-                $current_key = is_numeric($key) ? (int) $key : 0;
-
-                // Remove the original menu link view element from the tree.
-                array_splice($tree, $current_key, 1);
-
-                // Insert the subtree items at the same position.
-                foreach (array_reverse($subtree) as $item) {
-                  array_splice($tree, $current_key, 0, [$item]);
-                }
-              }
-            }
-          }
-        }
+  public function expandTree(array $items) {
+    foreach ($items as $key => $item) {
+      // Check if this is a view menu link by title pattern.
+      if (strpos($item['title'], '[View]') !== FALSE) {
+        $this->expandMenuItem($item);
       }
 
-      // Process subtrees recursively.
-      if (!empty($element->subtree)) {
-        $element->subtree = $this->expandTree($element->subtree);
+      // Process child items.
+      if (!empty($item['below'])) {
+        $items[$key]['below'] = $this->expandTree($item['below']);
       }
     }
 
-    return $tree;
+    return $items;
+  }
+
+  /**
+   * Expands a single menu item with view content.
+   *
+   * @param array $item
+   *   The menu item to expand.
+   */
+  protected function expandMenuItem(array &$item) {
+    // Find the menu link content entity.
+    $menu_link_content = $this->findMenuLinkContentByUrl($item);
+
+    if (!$menu_link_content) {
+      return;
+    }
+
+    // Extract metadata.
+    $metadata = $menu_link_content->get('metadata')->getValue();
+    if (empty($metadata[0])) {
+      return;
+    }
+
+    $metadata = $metadata[0];
+
+    // Check if we have view information.
+    if (empty($metadata['view_id']) || empty($metadata['display_id'])) {
+      return;
+    }
+
+    // Load and render the view.
+    $view_storage = $this->entityTypeManager->getStorage('view');
+    $view = $view_storage->load($metadata['view_id']);
+
+    if ($view) {
+      $view_output = $view->getExecutable()
+        ->buildRenderable($metadata['display_id']);
+
+      // Remove the default wrappers from the view.
+      $view_output['#theme_wrappers'] = [];
+
+      // Custom class.
+      $item['attributes']['class'][] = 'menu-item--view';
+
+      // Replace link content with view content.
+      $item['content_below'] = $view_output;
+
+      // Clean up title.
+      $item['title'] = str_replace(' [View]', '', $item['title']);
+    }
+  }
+
+  /**
+   * Finds a menu link content entity by URL.
+   *
+   * @param array $item
+   *   The menu item.
+   *
+   * @return \Drupal\menu_link_content\Entity\MenuLinkContent|null
+   *   The menu link content entity, or NULL if not found.
+   */
+  protected function findMenuLinkContentByUrl(array $item) {
+    $menu_link_content_storage = $this->entityTypeManager->getStorage('menu_link_content');
+
+    // Try to find by title first.
+    $menu_links = $menu_link_content_storage->loadByProperties([
+      'title' => $item['title'],
+    ]);
+
+    if (!empty($menu_links)) {
+      return reset($menu_links);
+    }
+
+    // If we couldn't find by title, try by plugin ID if available.
+    if (isset($item['original_link']) && method_exists($item['original_link'], 'getPluginId')) {
+      $plugin_id = $item['original_link']->getPluginId();
+      if (strpos($plugin_id, 'menu_link_content:') === 0) {
+        $uuid = substr($plugin_id, strlen('menu_link_content:'));
+        $menu_links = $menu_link_content_storage->loadByProperties(['uuid' => $uuid]);
+        if (!empty($menu_links)) {
+          return reset($menu_links);
+        }
+      }
+    }
+
+    return NULL;
   }
 
 }

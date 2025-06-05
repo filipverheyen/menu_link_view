@@ -8,6 +8,7 @@
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Cache\Cache;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\menu_link_content\Entity\MenuLinkContent;
 
 /**
  * Implements hook_help().
@@ -23,116 +24,132 @@ function menu_link_view_help($route_name, RouteMatchInterface $route_match) {
 }
 
 /**
- * Implements hook_menu_links_discovered_alter().
+ * Implements hook_entity_insert().
  */
-function menu_link_view_menu_links_discovered_alter(&$links) {
-  // Get all menu link view entities
-  $storage = \Drupal::entityTypeManager()->getStorage('menu_link_view');
-  $menu_link_views = $storage->loadMultiple();
+function menu_link_view_entity_insert($entity) {
+  if ($entity->getEntityTypeId() == 'menu_link_view') {
+    // Create a menu_link_content entity for this view link
+    _menu_link_view_ensure_menu_link_content($entity);
 
-  // Get the static override service
-  $static_override = \Drupal::service('menu_link.static.overrides');
+    // Invalidate necessary cache tags
+    Cache::invalidateTags(['menu:' . $entity->getMenuName(), 'config:system.menu.' . $entity->getMenuName()]);
 
-  // Add each menu link view entity as a menu link discovery item
-  foreach ($menu_link_views as $id => $menu_link_view) {
-    if (empty($id)) {
-      continue;
-    }
-
-    $plugin_id = 'menu_link_view:' . $id;
-
-    // Only load overrides if the plugin ID exists and is a string
-    $overrides = [];
-    if (is_string($plugin_id) && !empty($plugin_id)) {
-      try {
-        $overrides = $static_override->loadOverride($plugin_id) ?: [];
-      }
-      catch (\Exception $e) {
-        \Drupal::logger('menu_link_view')->error('Error loading override for plugin @id: @message', [
-          '@id' => $plugin_id,
-          '@message' => $e->getMessage(),
-        ]);
-      }
-    }
-
-    // Default enabled state is TRUE unless explicitly disabled
-    $enabled = !isset($overrides['enabled']) || $overrides['enabled'];
-    $weight = isset($overrides['weight']) ? $overrides['weight'] : $menu_link_view->getWeight();
-    $parent = isset($overrides['parent']) ? $overrides['parent'] : $menu_link_view->getParent();
-
-    // Create the menu link definition
-    $definition = [
-      'class' => 'Drupal\menu_link_view\Plugin\Menu\MenuLinkViewLink',
-      'menu_name' => $menu_link_view->getMenuName(),
-      'title' => $menu_link_view->label(),
-      'description' => $menu_link_view->getDescription(),
-      'weight' => $weight,
-      'id' => $plugin_id,
-      'metadata' => [
-        'entity_id' => $id,
-        'view_id' => $menu_link_view->getViewId(),
-        'display_id' => $menu_link_view->getDisplayId(),
-      ],
-      'form_class' => 'Drupal\menu_link_view\Form\MenuLinkViewForm',
-      'provider' => 'menu_link_view',
-      'route_name' => '<nolink>',
-      'parent' => $parent ?: '',
-      'expanded' => TRUE,
-      'options' => [],
-      'enabled' => $enabled,
-      // These flags are critical for proper visibility in the UI
-      'discovered' => TRUE,
-      'manipulable' => TRUE,
-    ];
-
-    // Set the plugin definition
-    $links[$plugin_id] = $definition;
-
-    // Debug log
-    \Drupal::logger('menu_link_view')->info('Menu link @id definition added to discovered links', [
-      '@id' => $plugin_id
+    // Log for debugging
+    \Drupal::logger('menu_link_view')->info('Menu link view entity @id inserted, content link created', [
+      '@id' => $entity->id()
     ]);
   }
 }
 
 /**
- * Implements hook_form_BASE_FORM_ID_alter() for menu_edit_form.
+ * Implements hook_entity_update().
  */
-function menu_link_view_form_menu_edit_form_alter(&$form, FormStateInterface $form_state, $form_id) {
-  // Force rebuild menu link tree when visiting menu edit form
-  \Drupal::service('plugin.manager.menu.link')->rebuild();
+function menu_link_view_entity_update($entity) {
+  if ($entity->getEntityTypeId() == 'menu_link_view') {
+    // Update or create the menu_link_content entity
+    _menu_link_view_ensure_menu_link_content($entity);
 
-  // Log for debugging
-  \Drupal::logger('menu_link_view')->info('Menu edit form altered, menu links rebuilt');
+    // Invalidate necessary cache tags
+    Cache::invalidateTags(['menu:' . $entity->getMenuName(), 'config:system.menu.' . $entity->getMenuName()]);
 
-  // Add a custom submit handler that runs first
-  array_unshift($form['#submit'], 'menu_link_view_menu_edit_form_submit');
-}
-
-/**
- * Custom submit handler for menu edit form.
- */
-function menu_link_view_menu_edit_form_submit($form, FormStateInterface $form_state) {
-  // Force rebuild of menu links
-  \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-  // Clear menu caches
-  $menu = $form_state->getFormObject()->getEntity();
-  Cache::invalidateTags(['menu:' . $menu->id(), 'config:system.menu.' . $menu->id()]);
-
-  // Log for debugging
-  \Drupal::logger('menu_link_view')->info('Menu form submit handler ran, links rebuilt');
-}
-
-/**
- * Implements hook_menu_local_tasks_alter().
- */
-function menu_link_view_menu_local_tasks_alter(&$data, $route_name) {
-  // Force rebuild menu links when visiting the menu UI
-  if (strpos($route_name, 'entity.menu.edit_form') === 0) {
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-    \Drupal::logger('menu_link_view')->info('Menu local tasks altered for route @route', ['@route' => $route_name]);
+    // Log for debugging
+    \Drupal::logger('menu_link_view')->info('Menu link view entity @id updated, content link updated', [
+      '@id' => $entity->id()
+    ]);
   }
+}
+
+/**
+ * Implements hook_entity_delete().
+ */
+function menu_link_view_entity_delete($entity) {
+  if ($entity->getEntityTypeId() == 'menu_link_view') {
+    // Find and delete any associated menu_link_content entities
+    $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+    $menu_links = $storage->loadByProperties([
+      'menu_name' => $entity->getMenuName(),
+      'link__uri' => 'route:<nolink>',
+      'title' => $entity->label() . ' [View]'
+    ]);
+
+    foreach ($menu_links as $menu_link) {
+      $menu_link->delete();
+    }
+
+    // Invalidate necessary cache tags
+    Cache::invalidateTags(['menu:' . $entity->getMenuName(), 'config:system.menu.' . $entity->getMenuName()]);
+
+    // Log for debugging
+    \Drupal::logger('menu_link_view')->info('Menu link view entity @id deleted, content link removed', [
+      '@id' => $entity->id()
+    ]);
+  }
+}
+
+/**
+ * Helper function to ensure a menu_link_content entity exists for the view link.
+ *
+ * @param \Drupal\menu_link_view\Entity\MenuLinkView $entity
+ *   The menu link view entity.
+ */
+function _menu_link_view_ensure_menu_link_content($entity) {
+  $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+
+  // Try to find an existing menu link
+  $menu_links = $storage->loadByProperties([
+    'menu_name' => $entity->getMenuName(),
+    'link__uri' => 'route:<nolink>',
+    'title' => $entity->label() . ' [View]'
+  ]);
+
+  $menu_link = reset($menu_links);
+
+  if (!$menu_link) {
+    // Create a new menu link content entity
+    $menu_link = MenuLinkContent::create([
+      'title' => $entity->label() . ' [View]',
+      'link' => ['uri' => 'route:<nolink>'],
+      'menu_name' => $entity->getMenuName(),
+      'weight' => $entity->getWeight(),
+      'expanded' => TRUE,
+      'description' => $entity->getDescription(),
+      'metadata' => [
+        'entity_id' => $entity->id(),
+        'view_id' => $entity->getViewId(),
+        'display_id' => $entity->getDisplayId(),
+      ],
+    ]);
+
+    // Set parent if available
+    if ($entity->getParent()) {
+      $menu_link->set('parent', $entity->getParent());
+    }
+
+    $menu_link->save();
+
+    \Drupal::logger('menu_link_view')->info('Created menu_link_content entity for view link @id', [
+      '@id' => $entity->id()
+    ]);
+  }
+  else {
+    // Update the existing menu link
+    $menu_link->set('title', $entity->label() . ' [View]');
+    $menu_link->set('description', $entity->getDescription());
+    $menu_link->set('weight', $entity->getWeight());
+
+    // Update parent if available
+    if ($entity->getParent()) {
+      $menu_link->set('parent', $entity->getParent());
+    }
+
+    $menu_link->save();
+
+    \Drupal::logger('menu_link_view')->info('Updated menu_link_content entity for view link @id', [
+      '@id' => $entity->id()
+    ]);
+  }
+
+  return $menu_link;
 }
 
 /**
@@ -146,81 +163,6 @@ function menu_link_view_preprocess_menu(&$variables) {
     if (isset($variables['items']) && !empty($variables['items'])) {
       $variables['items'] = $expander->expandTree($variables['items']);
     }
-  }
-}
-
-/**
- * Implements hook_entity_insert().
- */
-function menu_link_view_entity_insert($entity) {
-  if ($entity->getEntityTypeId() == 'menu_link_view') {
-    // Rebuild menu link plugin definitions
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-    // Clear menu UI overview cached data
-    \Drupal::service('cache.render')->invalidateAll();
-
-    // Invalidate necessary cache tags
-    Cache::invalidateTags([
-      'menu:' . $entity->getMenuName(),
-      'config:system.menu.' . $entity->getMenuName(),
-      'menu_link_content_list'
-    ]);
-
-    // Log for debugging
-    \Drupal::logger('menu_link_view')->info('Menu link view entity @id inserted, plugin rebuilt', [
-      '@id' => $entity->id()
-    ]);
-  }
-}
-
-/**
- * Implements hook_entity_update().
- */
-function menu_link_view_entity_update($entity) {
-  if ($entity->getEntityTypeId() == 'menu_link_view') {
-    // Rebuild menu link plugin definitions
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-    // Clear menu UI overview cached data
-    \Drupal::service('cache.render')->invalidateAll();
-
-    // Invalidate necessary cache tags
-    Cache::invalidateTags([
-      'menu:' . $entity->getMenuName(),
-      'config:system.menu.' . $entity->getMenuName(),
-      'menu_link_content_list'
-    ]);
-
-    // Log for debugging
-    \Drupal::logger('menu_link_view')->info('Menu link view entity @id updated, plugin rebuilt', [
-      '@id' => $entity->id()
-    ]);
-  }
-}
-
-/**
- * Implements hook_entity_delete().
- */
-function menu_link_view_entity_delete($entity) {
-  if ($entity->getEntityTypeId() == 'menu_link_view') {
-    // Rebuild menu link plugin definitions
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-    // Clear menu UI overview cached data
-    \Drupal::service('cache.render')->invalidateAll();
-
-    // Invalidate necessary cache tags
-    Cache::invalidateTags([
-      'menu:' . $entity->getMenuName(),
-      'config:system.menu.' . $entity->getMenuName(),
-      'menu_link_content_list'
-    ]);
-
-    // Log for debugging
-    \Drupal::logger('menu_link_view')->info('Menu link view entity @id deleted, plugin rebuilt', [
-      '@id' => $entity->id()
-    ]);
   }
 }
 
