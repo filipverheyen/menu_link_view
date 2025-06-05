@@ -1,6 +1,9 @@
 /**
  * @file
  * Styling for menu link view items in admin UI.
+ *
+ * Updated: 2025-06-05 11:51:39
+ * By: filipverheyen
  */
 
 /* Style view menu items differently */
@@ -34,17 +37,21 @@ tr.tabledrag-leaf.drag-hover-no-drop {
   background-color: #ffecec !important;
 }
 
-/* Hide add button for view menu items */
-.menu-link-view-item .dropbutton-wrapper a[href*="add"] {
+/* Hide specific operations we don't want */
+.menu-link-view-item a[href*="add"],
+.menu-link-view-item a[href*="translate"],
+.menu-link-view-item li.dropbutton-action a[href*="add"],
+.menu-link-view-item li.dropbutton-action a[href*="translate"] {
   display: none !important;
 }
 
-/* Hide elements with "hidden" class */
-.hidden {
-  display: none !important;
-}
-
-/* Make sure edit/delete operations are visible */
+/* Fix spacing when operations are removed */
 .menu-link-view-item .dropbutton-wrapper .dropbutton-widget {
-  display: block !important;
+  min-height: 32px;
+}
+
+/* Make sure the edit and delete operations are visible */
+.menu-link-view-item .dropbutton-wrapper .dropbutton-widget a[href*="edit"],
+.menu-link-view-item .dropbutton-wrapper .dropbutton-widget a[href*="delete"] {
+  display: inline-block !important;
 }

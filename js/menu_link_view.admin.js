@@ -2,12 +2,30 @@
  * @file
  * JavaScript behaviors for menu link view administration.
  *
- * Updated: 2025-06-05
+ * Updated: 2025-06-05 11:51:39
  * By: filipverheyen
  * Drupal 11 compatible
  */
 (function (Drupal, once, $) {
   "use strict";
+
+  /**
+   * Helper function to remove specific operations
+   */
+  function removeUnwantedOperations(element) {
+    // Find and remove add/translate operations in dropbutton
+    const operations = element.querySelectorAll(
+      'a[href*="add"], a[href*="translate"]'
+    );
+    operations.forEach(function (op) {
+      const listItem = op.closest("li");
+      if (listItem) {
+        listItem.remove();
+      } else {
+        op.remove();
+      }
+    });
+  }
 
   /**
    * Prevent other menu items from being dragged under menu view items.
@@ -19,6 +37,9 @@
         function (element) {
           // Add class for styling
           element.classList.add("no-child-allowed");
+
+          // Remove unwanted operations immediately
+          removeUnwantedOperations(element);
 
           // Listen for drag events and prevent dropping
           element.addEventListener("dragover", function (e) {
@@ -50,20 +71,12 @@
             return false;
           });
 
-          // If operations get added after page load (AJAX), hide any add operation
+          // If operations get added after page load (AJAX), remove unwanted ones
           const observer = new MutationObserver(function (mutations) {
             mutations.forEach(function (mutation) {
               if (mutation.addedNodes.length > 0) {
                 // Check for any newly added operation links
-                const addLink = element.querySelector(
-                  '.dropbutton-wrapper a[href*="add"]'
-                );
-                if (addLink) {
-                  const listItem = addLink.closest("li");
-                  if (listItem) {
-                    listItem.style.display = "none";
-                  }
-                }
+                removeUnwantedOperations(element);
               }
             });
           });

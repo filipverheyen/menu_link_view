@@ -65,6 +65,55 @@ function menu_link_view_entity_operation(EntityInterface $entity) {
 }
 
 /**
+ * Implements hook_entity_operation_alter().
+ */
+function menu_link_view_entity_operation_alter(array &$operations, EntityInterface $entity) {
+  if ($entity->getEntityTypeId() == 'menu_link_content') {
+    // Check if this is one of our special view menu items
+    $options = $entity->get('link')->options ?? [];
+    if (!empty($options['menu_link_view']) && !empty($options['menu_link_view']['entity_id'])) {
+      $entity_id = $options['menu_link_view']['entity_id'];
+
+      // Replace edit operation to point to our custom entity
+      if (isset($operations['edit'])) {
+        $operations['edit']['url'] = Url::fromRoute(
+          'entity.menu_link_view.edit_form',
+          ['menu_link_view' => $entity_id]
+        );
+        $operations['edit']['title'] = t('Edit view link');
+      }
+
+      // Replace delete operation to ensure both entities are deleted
+      if (isset($operations['delete'])) {
+        $operations['delete']['url'] = Url::fromRoute(
+          'entity.menu_link_view.delete_form',
+          ['menu_link_view' => $entity_id]
+        );
+      }
+
+      // Remove translate operation if it exists
+      if (isset($operations['translate'])) {
+        unset($operations['translate']);
+      }
+
+      // Remove add operation if it exists
+      if (isset($operations['add'])) {
+        unset($operations['add']);
+      }
+
+      // IMPORTANT: In Drupal admin UI these operations might be named differently
+      if (isset($operations['add-child'])) {
+        unset($operations['add-child']);
+      }
+
+      if (isset($operations['add_child'])) {
+        unset($operations['add_child']);
+      }
+    }
+  }
+}
+
+/**
  * Implements hook_menu_local_actions_alter().
  *
  * In Drupal 11, we use this to modify the action buttons that appear above the content.
@@ -158,12 +207,26 @@ function menu_link_view_process_menu_links($element) {
               $item['#attributes']['class'][] = 'menu-link-view-item';
               $item['#attributes']['data-menu-link-view'] = 'true';
 
-              // In Drupal 11, operations are typically rendered through an
-              // operations_dropbutton element
+              // Handle operations in various formats
+
+              // Handle operations as 'operations' element (D10/D11 format)
               if (isset($item['operations']['#type']) && $item['operations']['#type'] === 'operations') {
-                // Remove the add operation
+                // Remove add operations
                 if (isset($item['operations']['#links']['add'])) {
                   unset($item['operations']['#links']['add']);
+                }
+
+                if (isset($item['operations']['#links']['add-child'])) {
+                  unset($item['operations']['#links']['add-child']);
+                }
+
+                if (isset($item['operations']['#links']['add_child'])) {
+                  unset($item['operations']['#links']['add_child']);
+                }
+
+                // Remove translate operation
+                if (isset($item['operations']['#links']['translate'])) {
+                  unset($item['operations']['#links']['translate']);
                 }
 
                 // Replace edit operation
@@ -182,13 +245,26 @@ function menu_link_view_process_menu_links($element) {
                   );
                 }
               }
-              // For compatibility with both old and new styles
+              // Handle operations as dropbutton element
+              elseif (isset($item['operations']['#type']) && $item['operations']['#type'] === 'dropbutton') {
+                if (isset($item['operations']['#links'])) {
+                  foreach (['add', 'add-child', 'add_child', 'translate'] as $op_to_remove) {
+                    if (isset($item['operations']['#links'][$op_to_remove])) {
+                      unset($item['operations']['#links'][$op_to_remove]);
+                    }
+                  }
+                }
+              }
+              // Handle operations as individual buttons
               elseif (isset($item['operations'])) {
-                // Handle individual operations elements
-                if (isset($item['operations']['add'])) {
-                  unset($item['operations']['add']);
+                // Remove unwanted operations
+                foreach (['add', 'add-child', 'add_child', 'translate'] as $op_to_remove) {
+                  if (isset($item['operations'][$op_to_remove])) {
+                    unset($item['operations'][$op_to_remove]);
+                  }
                 }
 
+                // Replace edit operation
                 if (isset($item['operations']['edit'])) {
                   $item['operations']['edit']['#title'] = t('Edit view link');
                   $item['operations']['edit']['#url'] = Url::fromRoute(
@@ -197,6 +273,7 @@ function menu_link_view_process_menu_links($element) {
                   );
                 }
 
+                // Replace delete operation
                 if (isset($item['operations']['delete'])) {
                   $item['operations']['delete']['#url'] = Url::fromRoute(
                     'entity.menu_link_view.delete_form',
@@ -529,3 +606,29 @@ function menu_link_view_entity_access(EntityInterface $entity, $operation, Accou
   // Don't change access for other entities
   return AccessResult::neutral();
 }
+
+/**
+ * Implements hook_menu_links_discovered_alter().
+ *
+ * This helps control the available operations for our menu items at a deeper level.
+ */
+function menu_link_view_menu_links_discovered_alter(&$links) {
+  foreach ($links as $id => &$link) {
+    if (strpos($id, 'menu_link_content:') === 0) {
+      // We'll need to load the entity to check if it's a view menu item
+      $uuid = substr($id, strlen('menu_link_content:'));
+      $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+      $entities = $storage->loadByProperties(['uuid' => $uuid]);
+      $menu_link = reset($entities);
+
+      if ($menu_link) {
+        $options = $menu_link->get('link')->options ?? [];
+        if (!empty($options['menu_link_view'])) {
+          // For view menu items, prevent children
+          $link['metadata']['has_children'] = FALSE;
+        }
+      }
+    }
+  }
+}
+
