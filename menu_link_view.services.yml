@@ -1,7 +1,13 @@
 services:
-  menu_link_view.renderer:
-    class: Drupal\menu_link_view\MenuLinkViewRenderer
-    arguments: ["@entity_type.manager", "@renderer"]
   menu_link_view.menu_handler:
     class: Drupal\menu_link_view\MenuLinkViewMenuHandler
     arguments: ["@entity_type.manager"]
+  menu_link_view.menu_expander:
+    class: Drupal\menu_link_view\MenuLinkViewExpander
+    arguments:
+      [
+        "@entity_type.manager",
+        "@plugin.manager.menu.link",
+        "@language_manager",
+        "@cache.default",
+      ]
