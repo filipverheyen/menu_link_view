@@ -501,30 +501,44 @@ function menu_link_view_preprocess_menu(&$variables) {
     return;
   }
 
-  // Only process if we have a tree to modify
-  if (!empty($variables['menu_name'])) {
-    // Get our service
+  // Get our service
+  if (\Drupal::hasService('menu_link_view.menu_expander')) {
     $expander = \Drupal::service('menu_link_view.menu_expander');
 
-    // Process the menu tree
     if ($expander instanceof MenuLinkViewExpander) {
-      $variables['items'] = $expander->expandViewMenuItems($variables['items']);
+      // Log that we're processing this menu
+      \Drupal::logger('menu_link_view')->notice('Processing menu: @menu', [
+        '@menu' => $variables['menu_name'],
+      ]);
+
+      // Replace the items with expanded items
+      $variables['items'] = $expander->expandTreeItems(
+        $variables['items'],
+        $variables['menu_name']
+      );
+    }
+    else {
+      \Drupal::logger('menu_link_view')->error('Menu expander service is not of the correct class');
     }
   }
+  else {
+    \Drupal::logger('menu_link_view')->error('Menu expander service not found');
+  }
 }
+
 
 
 /**
  * Implements hook_theme().
  */
-function menu_link_view_theme($existing, $type, $theme, $path) {
+function menu_link_view_theme() {
   return [
     'menu_link_view' => [
       'variables' => [
-        'title' => NULL,
         'view_content' => NULL,
+        'view_id' => NULL,
+        'display_id' => NULL,
       ],
-      'template' => 'menu-link-view',
     ],
   ];
 }
@@ -618,66 +632,10 @@ function menu_link_view_menu_links_discovered_alter(&$links) {
 }
 
 /**
- * Implements hook_element_info_alter().
- *
- * This hook is executed before operations are added to the dropbutton elements.
+ * Implements hook_cache_flush().
  */
-function menu_link_view_element_info_alter(array &$info) {
-  if (isset($info['dropbutton'])) {
-    // Add a pre-render function to filter out operations for view menu items
-    $info['dropbutton']['#pre_render'][] = 'menu_link_view_dropbutton_pre_render';
-  }
-}
-
-/**
- * Pre-render callback for dropbutton elements.
- *
- * This runs before the dropbutton is rendered, allowing us to remove operations.
- */
-function menu_link_view_dropbutton_pre_render($element) {
-  // Only process if we have links
-  if (!isset($element['#links']) || !is_array($element['#links'])) {
-    return $element;
-  }
-
-  // Check if we have a plugin ID in the element or its parents
-  $plugin_id = NULL;
-
-  // Try to find plugin ID in the element attributes
-  if (isset($element['#attributes']['data-plugin-id'])) {
-    $plugin_id = $element['#attributes']['data-plugin-id'];
-  }
-  // Look through parent element if available
-  elseif (isset($element['#dropbutton_parents'])) {
-    $parents = $element['#dropbutton_parents'];
-    $parent = reset($parents);
-
-    if (isset($parent['#wrapper_attributes']['data-plugin-id'])) {
-      $plugin_id = $parent['#wrapper_attributes']['data-plugin-id'];
-    }
-    elseif (isset($parent['#attributes']['data-plugin-id'])) {
-      $plugin_id = $parent['#attributes']['data-plugin-id'];
-    }
-    elseif (isset($parent['#item']) && method_exists($parent['#item'], 'getPluginId')) {
-      $plugin_id = $parent['#item']->getPluginId();
-    }
-  }
-
-  // If we found a plugin ID, check if it's a view menu item
-  if ($plugin_id) {
-    /** @var \Drupal\menu_link_view\MenuLinkViewMenuHandler $menu_handler */
-    $menu_handler = \Drupal::service('menu_link_view.menu_handler');
-
-    if ($menu_handler->isViewMenuItem($plugin_id)) {
-      // Filter out any add/create operations
-      foreach ($element['#links'] as $key => $link) {
-        if (preg_match('/(add|create|translate)/i', $key)) {
-          unset($element['#links'][$key]);
-        }
-      }
-    }
-  }
-
-  return $element;
+function menu_link_view_cache_flush() {
+  // Clear our cache tags when cache is flushed
+  \Drupal::cache()->deleteAll('menu_link_view:');
 }
 

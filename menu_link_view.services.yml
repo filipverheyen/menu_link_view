@@ -2,6 +2,7 @@ services:
   menu_link_view.menu_handler:
     class: Drupal\menu_link_view\MenuLinkViewMenuHandler
     arguments: ["@entity_type.manager"]
+
   menu_link_view.menu_expander:
     class: Drupal\menu_link_view\MenuLinkViewExpander
     arguments:
@@ -10,4 +11,5 @@ services:
         "@plugin.manager.menu.link",
         "@language_manager",
         "@cache.default",
+        "@logger.factory",
       ]
