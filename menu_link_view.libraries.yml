@@ -1,0 +1,17 @@
+menu_link_view:
+  version: 1.x
+  css:
+    theme:
+      css/menu_link_view.css: {}
+
+menu-admin:
+  version: 1.x
+  js:
+    js/menu_link_view.admin.js: {}
+  css:
+    theme:
+      css/menu_link_view.admin.css: {}
+  dependencies:
+    - core/jquery
+    - core/drupal
+    - core/once

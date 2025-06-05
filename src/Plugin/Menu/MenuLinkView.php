@@ -4,6 +4,7 @@ namespace Drupal\menu_link_view\Entity;
 
 use Drupal\Core\Cache\Cache;
 use Drupal\Core\Config\Entity\ConfigEntityBase;
+use Drupal\Core\Entity\EntityStorageInterface;
 
 /**
  * Defines the Menu Link View entity.
@@ -104,70 +105,42 @@ class MenuLinkView extends ConfigEntityBase {
   protected $display_id;
 
   /**
-   * Gets the title.
-   *
-   * @return string
-   *   The title.
-   */
-  public function getTitle() {
-    return $this->title;
-  }
-
-  /**
-   * Gets the description.
-   *
-   * @return string
-   *   The description.
+   * {@inheritdoc}
    */
   public function getDescription() {
-    return $this->description ?? '';
+    return $this->description ?: '';
   }
 
   /**
-   * Gets the menu name.
-   *
-   * @return string
-   *   The menu name.
+   * {@inheritdoc}
    */
   public function getMenuName() {
     return $this->menu_name;
   }
 
   /**
-   * Gets the parent.
-   *
-   * @return string
-   *   The parent.
+   * {@inheritdoc}
    */
   public function getParent() {
-    return $this->parent;
+    return $this->parent ?: '';
   }
 
   /**
-   * Gets the weight.
-   *
-   * @return int
-   *   The weight.
+   * {@inheritdoc}
    */
   public function getWeight() {
     return $this->weight;
   }
 
   /**
-   * Gets the view ID.
-   *
-   * @return string
-   *   The view ID.
+   * {@inheritdoc}
    */
   public function getViewId() {
     return $this->view_id;
   }
 
   /**
-   * Gets the display ID.
-   *
-   * @return string
-   *   The display ID.
+   * {@inheritdoc}
    */
   public function getDisplayId() {
     return $this->display_id;
@@ -194,10 +167,13 @@ class MenuLinkView extends ConfigEntityBase {
   /**
    * {@inheritdoc}
    */
-  public function getCacheTagsToInvalidate() {
-    return Cache::mergeTags(parent::getCacheTagsToInvalidate(), [
-      'config:system.menu.' . $this->getMenuName(),
+  public function postSave(EntityStorageInterface $storage, $update = TRUE) {
+    parent::postSave($storage, $update);
+
+    // Invalidate cache tags for this menu.
+    Cache::invalidateTags([
       'menu:' . $this->getMenuName(),
+      'config:system.menu.' . $this->getMenuName(),
     ]);
   }
 

@@ -1,0 +1,18 @@
+{#
+/**
+ * @file
+ * Default theme implementation for a menu link view.
+ *
+ * Available variables:
+ * - title: The title of the menu item.
+ * - view_content: The rendered view content.
+ */
+#}
+<div class="menu-link-view">
+  {% if title %}
+    <h3 class="menu-link-view__title">{{ title }}</h3>
+  {% endif %}
+  <div class="menu-link-view__content">
+    {{ view_content }}
+  </div>
+</div>
