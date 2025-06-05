@@ -10,7 +10,7 @@ use Drupal\Core\Url;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
- * Provides a custom menu link for view references.
+ * Defines a menu link for View references.
  *
  * @MenuLink(
  *   id = "menu_link_view",
@@ -136,6 +136,12 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
         $plugin_id = $this->getPluginId();
         if (is_string($plugin_id) && !empty($plugin_id)) {
           $this->staticOverride->saveOverride($plugin_id, $overrides);
+
+          // Log the override.
+          \Drupal::logger('menu_link_view')->info('Saved override for @id: @overrides', [
+            '@id' => $plugin_id,
+            '@overrides' => json_encode($overrides),
+          ]);
         }
       }
       catch (\Exception $e) {
@@ -273,27 +279,6 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
   public function getCacheTags() {
     $entity_id = $this->extractEntityIdFromPluginId();
     return ['config:menu_link_view.menu_link_view.' . $entity_id];
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getManipulationPluginId() {
-    return $this->getPluginId();
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function inActiveTrail() {
-    return FALSE;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getTranslatedTitle() {
-    return $this->t('@title', ['@title' => $this->getTitle()]);
   }
 
 }

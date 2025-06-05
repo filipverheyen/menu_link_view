@@ -2,68 +2,92 @@
 
 namespace Drupal\menu_link_view\Entity;
 
+use Drupal\Core\Cache\Cache;
 use Drupal\Core\Config\Entity\ConfigEntityBase;
-use Drupal\Core\Entity\EntityStorageInterface;
-use Drupal\menu_link_view\MenuLinkViewInterface;
 
 /**
- * Defines the Menu link view entity.
+ * Defines the Menu Link View entity.
  *
  * @ConfigEntityType(
  *   id = "menu_link_view",
- *   label = @Translation("Menu link view"),
+ *   label = @Translation("Menu Link View"),
  *   handlers = {
  *     "list_builder" = "Drupal\menu_link_view\MenuLinkViewListBuilder",
  *     "form" = {
- *       "default" = "Drupal\menu_link_view\Form\MenuLinkViewForm",
- *       "add" = "Drupal\menu_link_view\Form\MenuLinkViewAddForm",
+ *       "add" = "Drupal\menu_link_view\Form\MenuLinkViewForm",
  *       "edit" = "Drupal\menu_link_view\Form\MenuLinkViewForm",
- *       "delete" = "Drupal\menu_link_view\Form\MenuLinkViewDeleteForm"
- *     },
- *     "route_provider" = {
- *       "html" = "Drupal\Core\Entity\Routing\AdminHtmlRouteProvider",
+ *       "delete" = "Drupal\Core\Entity\EntityDeleteForm"
  *     }
  *   },
  *   config_prefix = "menu_link_view",
  *   admin_permission = "administer menu",
  *   entity_keys = {
  *     "id" = "id",
+ *     "label" = "title",
  *     "uuid" = "uuid",
- *     "label" = "title"
- *   },
- *   links = {
- *     "canonical" = "/admin/structure/menu/view-link/{menu_link_view}",
- *     "edit-form" = "/admin/structure/menu/view-link/{menu_link_view}/edit",
- *     "delete-form" = "/admin/structure/menu/view-link/{menu_link_view}/delete",
- *     "collection" = "/admin/structure/menu/view-links"
+ *     "status" = "status",
  *   },
  *   config_export = {
  *     "id",
  *     "title",
- *     "view_id",
- *     "display_id",
+ *     "description",
  *     "menu_name",
  *     "parent",
  *     "weight",
- *     "description"
+ *     "view_id",
+ *     "display_id",
+ *     "status",
+ *   },
+ *   links = {
+ *     "edit-form" = "/admin/structure/menu_link_view/{menu_link_view}/edit",
+ *     "delete-form" = "/admin/structure/menu_link_view/{menu_link_view}/delete",
+ *     "collection" = "/admin/structure/menu_link_view",
  *   }
  * )
  */
-class MenuLinkView extends ConfigEntityBase implements MenuLinkViewInterface {
+class MenuLinkView extends ConfigEntityBase {
 
   /**
-   * The Menu link view ID.
+   * The Menu Link View ID.
    *
    * @var string
    */
   protected $id;
 
   /**
-   * The Menu link view title.
+   * The Menu Link View title.
    *
    * @var string
    */
   protected $title;
+
+  /**
+   * The description.
+   *
+   * @var string
+   */
+  protected $description;
+
+  /**
+   * The menu name.
+   *
+   * @var string
+   */
+  protected $menu_name;
+
+  /**
+   * The parent menu link ID.
+   *
+   * @var string
+   */
+  protected $parent;
+
+  /**
+   * The weight.
+   *
+   * @var int
+   */
+  protected $weight = 0;
 
   /**
    * The View ID.
@@ -80,50 +104,70 @@ class MenuLinkView extends ConfigEntityBase implements MenuLinkViewInterface {
   protected $display_id;
 
   /**
-   * The menu name.
+   * Gets the title.
    *
-   * @var string
+   * @return string
+   *   The title.
    */
-  protected $menu_name;
+  public function getTitle() {
+    return $this->title;
+  }
 
   /**
-   * The parent menu link plugin ID.
+   * Gets the description.
    *
-   * @var string
+   * @return string
+   *   The description.
    */
-  protected $parent = '';
+  public function getDescription() {
+    return $this->description ?? '';
+  }
 
   /**
-   * The weight of the menu link.
+   * Gets the menu name.
    *
-   * @var int
+   * @return string
+   *   The menu name.
    */
-  protected $weight = 0;
+  public function getMenuName() {
+    return $this->menu_name;
+  }
 
   /**
-   * The description of the menu link.
+   * Gets the parent.
    *
-   * @var string
+   * @return string
+   *   The parent.
    */
-  protected $description = '';
+  public function getParent() {
+    return $this->parent;
+  }
 
   /**
-   * {@inheritdoc}
+   * Gets the weight.
+   *
+   * @return int
+   *   The weight.
+   */
+  public function getWeight() {
+    return $this->weight;
+  }
+
+  /**
+   * Gets the view ID.
+   *
+   * @return string
+   *   The view ID.
    */
   public function getViewId() {
     return $this->view_id;
   }
 
   /**
-   * {@inheritdoc}
-   */
-  public function setViewId($view_id) {
-    $this->view_id = $view_id;
-    return $this;
-  }
-
-  /**
-   * {@inheritdoc}
+   * Gets the display ID.
+   *
+   * @return string
+   *   The display ID.
    */
   public function getDisplayId() {
     return $this->display_id;
@@ -132,68 +176,18 @@ class MenuLinkView extends ConfigEntityBase implements MenuLinkViewInterface {
   /**
    * {@inheritdoc}
    */
-  public function setDisplayId($display_id) {
-    $this->display_id = $display_id;
-    return $this;
-  }
+  public function calculateDependencies() {
+    parent::calculateDependencies();
 
-  /**
-   * {@inheritdoc}
-   */
-  public function getMenuName() {
-    return $this->menu_name;
-  }
+    // Add dependency on the view.
+    $view_storage = \Drupal::entityTypeManager()->getStorage('view');
+    if ($view = $view_storage->load($this->getViewId())) {
+      $this->addDependency('config', $view->getConfigDependencyName());
+    }
 
-  /**
-   * {@inheritdoc}
-   */
-  public function setMenuName($menu_name) {
-    $this->menu_name = $menu_name;
-    return $this;
-  }
+    // Add dependency on the menu.
+    $this->addDependency('config', 'system.menu.' . $this->getMenuName());
 
-  /**
-   * {@inheritdoc}
-   */
-  public function getParent() {
-    return $this->parent;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function setParent($parent) {
-    $this->parent = $parent;
-    return $this;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getWeight() {
-    return $this->weight;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function setWeight($weight) {
-    $this->weight = $weight;
-    return $this;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getDescription() {
-    return $this->description;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function setDescription($description) {
-    $this->description = $description;
     return $this;
   }
 
@@ -201,45 +195,10 @@ class MenuLinkView extends ConfigEntityBase implements MenuLinkViewInterface {
    * {@inheritdoc}
    */
   public function getCacheTagsToInvalidate() {
-    return array_merge(parent::getCacheTagsToInvalidate(), [
-      'menu:' . $this->getMenuName(),
+    return Cache::mergeTags(parent::getCacheTagsToInvalidate(), [
       'config:system.menu.' . $this->getMenuName(),
-    ]);
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function postSave(EntityStorageInterface $storage, $update = TRUE) {
-    parent::postSave($storage, $update);
-
-    // Rebuild the menu link plugin definitions.
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-    // Clear menu cache tags.
-    \Drupal::service('cache_tags.invalidator')->invalidateTags([
       'menu:' . $this->getMenuName(),
-      'config:system.menu.' . $this->getMenuName(),
-      'menu_link_content',
     ]);
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public static function postDelete(EntityStorageInterface $storage, array $entities) {
-    parent::postDelete($storage, $entities);
-
-    // Rebuild the menu link plugin definitions.
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-    // Clear menu cache tags.
-    $tags = [];
-    foreach ($entities as $entity) {
-      $tags[] = 'menu:' . $entity->getMenuName();
-      $tags[] = 'config:system.menu.' . $entity->getMenuName();
-    }
-    \Drupal::service('cache_tags.invalidator')->invalidateTags($tags);
   }
 
 }

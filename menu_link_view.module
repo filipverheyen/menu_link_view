@@ -54,15 +54,16 @@ function menu_link_view_menu_links_discovered_alter(&$links) {
       }
     }
 
-    // Create the menu link definition with defaults
+    // Default enabled state is TRUE unless explicitly disabled
     $enabled = !isset($overrides['enabled']) || $overrides['enabled'];
     $weight = isset($overrides['weight']) ? $overrides['weight'] : $menu_link_view->getWeight();
     $parent = isset($overrides['parent']) ? $overrides['parent'] : $menu_link_view->getParent();
 
+    // Create the menu link definition
     $definition = [
       'class' => 'Drupal\menu_link_view\Plugin\Menu\MenuLinkViewLink',
       'menu_name' => $menu_link_view->getMenuName(),
-      'title' => $menu_link_view->label(),
+      'title' => $menu_link_view->label(), // Use label() instead of getTitle()
       'description' => $menu_link_view->getDescription(),
       'weight' => $weight,
       'id' => $plugin_id,
@@ -78,6 +79,7 @@ function menu_link_view_menu_links_discovered_alter(&$links) {
       'expanded' => TRUE,
       'options' => [],
       'enabled' => $enabled,
+      // These flags are critical for proper visibility in the UI
       'discovered' => TRUE,
       'manipulable' => TRUE,
     ];
@@ -92,11 +94,12 @@ function menu_link_view_menu_links_discovered_alter(&$links) {
  */
 function menu_link_view_preprocess_menu(&$variables) {
   // Get the expander service.
-  $expander = \Drupal::service('menu_link_view.expander');
-
-  // Expand the menu items.
-  if (isset($variables['items']) && !empty($variables['items'])) {
-    $variables['items'] = $expander->expandTree($variables['items']);
+  if (\Drupal::hasService('menu_link_view.expander')) {
+    $expander = \Drupal::service('menu_link_view.expander');
+    // Expand the menu items.
+    if (isset($variables['items']) && !empty($variables['items'])) {
+      $variables['items'] = $expander->expandTree($variables['items']);
+    }
   }
 }
 
@@ -109,10 +112,15 @@ function menu_link_view_entity_insert($entity) {
     \Drupal::service('plugin.manager.menu.link')->rebuild();
 
     // Invalidate necessary cache tags
-    Cache::invalidateTags(['menu:' . $entity->getMenuName(), 'config:system.menu.' . $entity->getMenuName()]);
+    Cache::invalidateTags([
+      'menu:' . $entity->getMenuName(),
+      'config:system.menu.' . $entity->getMenuName()
+    ]);
 
     // Log for debugging
-    \Drupal::logger('menu_link_view')->info('Menu link view entity @id inserted, plugin rebuilt', ['@id' => $entity->id()]);
+    \Drupal::logger('menu_link_view')->info('Menu link view entity @id inserted, plugin rebuilt', [
+      '@id' => $entity->id()
+    ]);
   }
 }
 
@@ -125,10 +133,15 @@ function menu_link_view_entity_update($entity) {
     \Drupal::service('plugin.manager.menu.link')->rebuild();
 
     // Invalidate necessary cache tags
-    Cache::invalidateTags(['menu:' . $entity->getMenuName(), 'config:system.menu.' . $entity->getMenuName()]);
+    Cache::invalidateTags([
+      'menu:' . $entity->getMenuName(),
+      'config:system.menu.' . $entity->getMenuName()
+    ]);
 
     // Log for debugging
-    \Drupal::logger('menu_link_view')->info('Menu link view entity @id updated, plugin rebuilt', ['@id' => $entity->id()]);
+    \Drupal::logger('menu_link_view')->info('Menu link view entity @id updated, plugin rebuilt', [
+      '@id' => $entity->id()
+    ]);
   }
 }
 
@@ -141,11 +154,24 @@ function menu_link_view_entity_delete($entity) {
     \Drupal::service('plugin.manager.menu.link')->rebuild();
 
     // Invalidate necessary cache tags
-    Cache::invalidateTags(['menu:' . $entity->getMenuName(), 'config:system.menu.' . $entity->getMenuName()]);
+    Cache::invalidateTags([
+      'menu:' . $entity->getMenuName(),
+      'config:system.menu.' . $entity->getMenuName()
+    ]);
 
     // Log for debugging
-    \Drupal::logger('menu_link_view')->info('Menu link view entity @id deleted, plugin rebuilt', ['@id' => $entity->id()]);
+    \Drupal::logger('menu_link_view')->info('Menu link view entity @id deleted, plugin rebuilt', [
+      '@id' => $entity->id()
+    ]);
   }
+}
+
+/**
+ * Implements hook_cron().
+ */
+function menu_link_view_cron() {
+  // Once per cron run, rebuild menu links to ensure they're properly registered
+  \Drupal::service('plugin.manager.menu.link')->rebuild();
 }
 
 /**
@@ -186,12 +212,4 @@ function menu_link_view_library_info_build() {
   ];
 
   return $libraries;
-}
-
-/**
- * Implements hook_cache_flush().
- */
-function menu_link_view_cache_flush() {
-  // Rebuild menu links
-  \Drupal::service('plugin.manager.menu.link')->rebuild();
 }
