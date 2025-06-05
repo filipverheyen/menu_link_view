@@ -12,4 +12,6 @@ services:
         "@language_manager",
         "@cache.default",
         "@logger.factory",
+        "@path.matcher",
+        "@request_stack",
       ]

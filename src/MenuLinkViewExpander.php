@@ -7,8 +7,11 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Menu\MenuLinkManagerInterface;
+use Drupal\Core\Path\PathMatcherInterface;
 use Drupal\Core\StringTranslation\StringTranslationTrait;
+use Drupal\Core\Url;
 use Drupal\views\Views;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Class MenuLinkViewExpander.
@@ -55,11 +58,25 @@ class MenuLinkViewExpander {
   protected $loggerFactory;
 
   /**
-   * Debug mode flag.
+   * The path matcher.
    *
-   * @var bool
+   * @var \Drupal\Core\Path\PathMatcherInterface
    */
-  protected $debugMode = TRUE;
+  protected $pathMatcher;
+
+  /**
+   * The request stack.
+   *
+   * @var \Symfony\Component\HttpFoundation\RequestStack
+   */
+  protected $requestStack;
+
+  /**
+   * The current path.
+   *
+   * @var string
+   */
+  protected $currentPath;
 
   /**
    * MenuLinkViewExpander constructor.
@@ -74,19 +91,30 @@ class MenuLinkViewExpander {
    *   The cache backend.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
+   * @param \Drupal\Core\Path\PathMatcherInterface $path_matcher
+   *   The path matcher.
+   * @param \Symfony\Component\HttpFoundation\RequestStack $request_stack
+   *   The request stack.
    */
   public function __construct(
     EntityTypeManagerInterface $entity_type_manager,
     MenuLinkManagerInterface $menu_link_manager,
     LanguageManagerInterface $language_manager,
     CacheBackendInterface $cache_backend,
-    LoggerChannelFactoryInterface $logger_factory
+    LoggerChannelFactoryInterface $logger_factory,
+    PathMatcherInterface $path_matcher,
+    RequestStack $request_stack
   ) {
     $this->entityTypeManager = $entity_type_manager;
     $this->menuLinkManager = $menu_link_manager;
     $this->languageManager = $language_manager;
     $this->cacheBackend = $cache_backend;
     $this->loggerFactory = $logger_factory;
+    $this->pathMatcher = $path_matcher;
+    $this->requestStack = $request_stack;
+
+    // Get the current path.
+    $this->currentPath = $this->requestStack->getCurrentRequest()->getPathInfo();
   }
 
   /**
@@ -102,13 +130,9 @@ class MenuLinkViewExpander {
    */
   public function expandTreeItems(array $menu_items, string $menu_name) {
     $expanded_items = [];
+    $has_active_child = FALSE;
 
     foreach ($menu_items as $key => $item) {
-      // Debug information.
-      if ($this->debugMode) {
-        $this->log('Processing menu item: @key', ['@key' => $key]);
-      }
-
       // Check if this is a view menu item.
       if ($this->isMenuLinkViewItem($item)) {
         // This is a view menu item, get its config.
@@ -122,8 +146,20 @@ class MenuLinkViewExpander {
             // Create menu items from the view results.
             $view_menu_items = $this->createMenuItemsFromResults($view_results, $item, $menu_name);
 
+            // Check if any of these items are in the active trail.
+            $has_active_item = FALSE;
+            foreach ($view_menu_items as $view_key => $view_item) {
+              if (!empty($view_item['in_active_trail'])) {
+                $has_active_item = TRUE;
+                $has_active_child = TRUE;
+                break;
+              }
+            }
+
             // Add the view menu items to the expanded items.
-            $expanded_items = array_merge($expanded_items, $view_menu_items);
+            foreach ($view_menu_items as $view_key => $view_item) {
+              $expanded_items[$view_key] = $view_item;
+            }
 
             // Skip the original item.
             continue;
@@ -136,7 +172,17 @@ class MenuLinkViewExpander {
 
       // Process children if any.
       if (!empty($item['below'])) {
-        $expanded_items[$key]['below'] = $this->expandTreeItems($item['below'], $menu_name);
+        $child_items = $this->expandTreeItems($item['below'], $menu_name);
+        $expanded_items[$key]['below'] = $child_items;
+
+        // Check if any child is in the active trail.
+        foreach ($child_items as $child_item) {
+          if (!empty($child_item['in_active_trail'])) {
+            $has_active_child = TRUE;
+            $expanded_items[$key]['in_active_trail'] = TRUE;
+            break;
+          }
+        }
       }
     }
 
@@ -161,9 +207,6 @@ class MenuLinkViewExpander {
 
     // Check if this is one of our menu link view derivatives.
     if ($link->getProvider() == 'menu_link_view') {
-      if ($this->debugMode) {
-        $this->log('Found view menu item by provider: @provider', ['@provider' => $link->getProvider()]);
-      }
       return TRUE;
     }
 
@@ -173,9 +216,6 @@ class MenuLinkViewExpander {
 
       // Check if our module's metadata is present.
       if (!empty($options['menu_link_view'])) {
-        if ($this->debugMode) {
-          $this->log('Found view menu item by options: @options', ['@options' => print_r($options, TRUE)]);
-        }
         return TRUE;
       }
 
@@ -190,9 +230,6 @@ class MenuLinkViewExpander {
           if ($menu_link_content) {
             $options = $menu_link_content->link->options ?? [];
             if (!empty($options['menu_link_view'])) {
-              if ($this->debugMode) {
-                $this->log('Found view menu item by entity options: @options', ['@options' => print_r($options, TRUE)]);
-              }
               return TRUE;
             }
           }
@@ -246,10 +283,6 @@ class MenuLinkViewExpander {
       }
     }
 
-    if ($this->debugMode && !empty($view_info)) {
-      $this->log('View info: @info', ['@info' => print_r($view_info, TRUE)]);
-    }
-
     return $view_info;
   }
 
@@ -270,12 +303,6 @@ class MenuLinkViewExpander {
     // Load and execute the view.
     $view = Views::getView($view_id);
     if (!$view || !$view->access($display_id)) {
-      if ($this->debugMode) {
-        $this->log('Could not load view @view_id:@display_id or access denied', [
-          '@view_id' => $view_id,
-          '@display_id' => $display_id,
-        ]);
-      }
       return [];
     }
 
@@ -298,14 +325,6 @@ class MenuLinkViewExpander {
       }
     }
 
-    if ($this->debugMode) {
-      $this->log('View @view_id:@display_id returned @count results', [
-        '@view_id' => $view_id,
-        '@display_id' => $display_id,
-        '@count' => count($results),
-      ]);
-    }
-
     return $results;
   }
 
@@ -325,6 +344,10 @@ class MenuLinkViewExpander {
   protected function createMenuItemsFromResults(array $results, array $parent_item, string $menu_name) {
     $menu_items = [];
     $weight = 0;
+
+    // Copy all attributes from parent item to ensure consistent rendering.
+    $parent_attributes = $parent_item['attributes'] ?? ['class' => []];
+    $parent_in_trail = $parent_item['in_active_trail'] ?? FALSE;
 
     foreach ($results as $result) {
       $entity = $result['entity'];
@@ -346,63 +369,91 @@ class MenuLinkViewExpander {
         // Create a unique key for this menu item.
         $key = 'menu_link_view_' . md5($parent_item['original_link']->getPluginId() . '_' . $index);
 
-        // Build the menu item.
-        $menu_items[$key] = [
-          'title' => $title,
-          'url' => $url,
-          'below' => [],
-          'original_link' => new SyntheticMenuLink([
-            'title' => $title,
-            'route_name' => $url->getRouteName(),
-            'route_parameters' => $url->getRouteParameters(),
-            'url' => $url->toString(),
-            'menu_name' => $menu_name,
-            'parent' => $parent_item['original_link']->getPluginId(),
-            'weight' => $weight,
-            'expanded' => FALSE,
-            'provider' => 'menu_link_view',
-            'metadata' => [
-              'entity_id' => $entity->id(),
-              'entity_type' => $entity->getEntityTypeId(),
-              'view_row_index' => $index,
-              'parent_link_id' => $parent_item['original_link']->getPluginId(),
-            ],
-          ]),
-          'in_active_trail' => $parent_item['in_active_trail'] ?? FALSE,
-          'attributes' => [
-            'class' => [
-              'menu-item',
-              'menu-link-view-generated',
-            ],
-          ],
-        ];
+        // Copy the parent item exactly and only change what's necessary.
+        $menu_item = $parent_item;
 
+        // Update with entity-specific data.
+        $menu_item['title'] = $title;
+        $menu_item['url'] = $url;
+        $menu_item['below'] = [];
+
+        // Create attributes for this item.
+        $menu_item['attributes'] = $parent_attributes;
+        if (!isset($menu_item['attributes']['class'])) {
+          $menu_item['attributes']['class'] = [];
+        }
+
+        // Add our special class while preserving all others.
+        $menu_item['attributes']['class'][] = 'menu-item--view-generated';
+
+        // Check if this item is in the active trail.
+        $is_active = $this->isUrlInActiveTrail($url);
+        $menu_item['in_active_trail'] = $is_active || $parent_in_trail;
+
+        if ($is_active) {
+          $menu_item['attributes']['class'][] = 'menu-item--active-trail';
+        }
+
+        // Replace the original link.
+        $menu_item['original_link'] = new SyntheticMenuLink([
+          'title' => $title,
+          'route_name' => $url->getRouteName(),
+          'route_parameters' => $url->getRouteParameters(),
+          'url' => $url->toString(),
+          'menu_name' => $menu_name,
+          'parent' => $parent_item['original_link']->getPluginId(),
+          'weight' => $weight,
+          'expanded' => FALSE,
+          'provider' => 'menu_link_view',
+          'metadata' => [
+            'entity_id' => $entity->id(),
+            'entity_type' => $entity->getEntityTypeId(),
+            'view_row_index' => $index,
+            'parent_link_id' => $parent_item['original_link']->getPluginId(),
+          ],
+        ]);
+
+        $menu_items[$key] = $menu_item;
         $weight++;
       }
       catch (\Exception $e) {
-        if ($this->debugMode) {
-          $this->log('Error creating menu item from entity: @message', ['@message' => $e->getMessage()]);
-        }
+        $this->loggerFactory->get('menu_link_view')->error('Error creating menu item from entity: @message', ['@message' => $e->getMessage()]);
       }
-    }
-
-    if ($this->debugMode) {
-      $this->log('Created @count menu items from view results', ['@count' => count($menu_items)]);
     }
 
     return $menu_items;
   }
 
   /**
-   * Log a message if debug mode is on.
+   * Check if a URL is in the active trail.
    *
-   * @param string $message
-   *   The message to log.
-   * @param array $context
-   *   The context for the message.
+   * @param \Drupal\Core\Url $url
+   *   The URL to check.
+   *
+   * @return bool
+   *   TRUE if the URL is in the active trail, FALSE otherwise.
    */
-  protected function log($message, array $context = []) {
-    $this->loggerFactory->get('menu_link_view')->notice($message, $context);
+  protected function isUrlInActiveTrail(Url $url) {
+    // If this is the current path.
+    if ($url->isRouted()) {
+      // Get the system path for the URL.
+      $url_path = $url->toString();
+
+      // Compare with current path.
+      $current_path = $this->currentPath;
+
+      // Direct match.
+      if ($url_path == $current_path) {
+        return TRUE;
+      }
+
+      // Check if the current path is a child of this URL.
+      if (strpos($current_path, $url_path) === 0) {
+        return TRUE;
+      }
+    }
+
+    return FALSE;
   }
 
 }
