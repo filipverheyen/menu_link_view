@@ -7,6 +7,7 @@
 
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Cache\Cache;
+use Drupal\Core\Form\FormStateInterface;
 
 /**
  * Implements hook_help().
@@ -63,7 +64,7 @@ function menu_link_view_menu_links_discovered_alter(&$links) {
     $definition = [
       'class' => 'Drupal\menu_link_view\Plugin\Menu\MenuLinkViewLink',
       'menu_name' => $menu_link_view->getMenuName(),
-      'title' => $menu_link_view->label(), // Use label() instead of getTitle()
+      'title' => $menu_link_view->label(),
       'description' => $menu_link_view->getDescription(),
       'weight' => $weight,
       'id' => $plugin_id,
@@ -86,6 +87,51 @@ function menu_link_view_menu_links_discovered_alter(&$links) {
 
     // Set the plugin definition
     $links[$plugin_id] = $definition;
+
+    // Debug log
+    \Drupal::logger('menu_link_view')->info('Menu link @id definition added to discovered links', [
+      '@id' => $plugin_id
+    ]);
+  }
+}
+
+/**
+ * Implements hook_form_BASE_FORM_ID_alter() for menu_edit_form.
+ */
+function menu_link_view_form_menu_edit_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  // Force rebuild menu link tree when visiting menu edit form
+  \Drupal::service('plugin.manager.menu.link')->rebuild();
+
+  // Log for debugging
+  \Drupal::logger('menu_link_view')->info('Menu edit form altered, menu links rebuilt');
+
+  // Add a custom submit handler that runs first
+  array_unshift($form['#submit'], 'menu_link_view_menu_edit_form_submit');
+}
+
+/**
+ * Custom submit handler for menu edit form.
+ */
+function menu_link_view_menu_edit_form_submit($form, FormStateInterface $form_state) {
+  // Force rebuild of menu links
+  \Drupal::service('plugin.manager.menu.link')->rebuild();
+
+  // Clear menu caches
+  $menu = $form_state->getFormObject()->getEntity();
+  Cache::invalidateTags(['menu:' . $menu->id(), 'config:system.menu.' . $menu->id()]);
+
+  // Log for debugging
+  \Drupal::logger('menu_link_view')->info('Menu form submit handler ran, links rebuilt');
+}
+
+/**
+ * Implements hook_menu_local_tasks_alter().
+ */
+function menu_link_view_menu_local_tasks_alter(&$data, $route_name) {
+  // Force rebuild menu links when visiting the menu UI
+  if (strpos($route_name, 'entity.menu.edit_form') === 0) {
+    \Drupal::service('plugin.manager.menu.link')->rebuild();
+    \Drupal::logger('menu_link_view')->info('Menu local tasks altered for route @route', ['@route' => $route_name]);
   }
 }
 
@@ -111,10 +157,14 @@ function menu_link_view_entity_insert($entity) {
     // Rebuild menu link plugin definitions
     \Drupal::service('plugin.manager.menu.link')->rebuild();
 
+    // Clear menu UI overview cached data
+    \Drupal::service('cache.render')->invalidateAll();
+
     // Invalidate necessary cache tags
     Cache::invalidateTags([
       'menu:' . $entity->getMenuName(),
-      'config:system.menu.' . $entity->getMenuName()
+      'config:system.menu.' . $entity->getMenuName(),
+      'menu_link_content_list'
     ]);
 
     // Log for debugging
@@ -132,10 +182,14 @@ function menu_link_view_entity_update($entity) {
     // Rebuild menu link plugin definitions
     \Drupal::service('plugin.manager.menu.link')->rebuild();
 
+    // Clear menu UI overview cached data
+    \Drupal::service('cache.render')->invalidateAll();
+
     // Invalidate necessary cache tags
     Cache::invalidateTags([
       'menu:' . $entity->getMenuName(),
-      'config:system.menu.' . $entity->getMenuName()
+      'config:system.menu.' . $entity->getMenuName(),
+      'menu_link_content_list'
     ]);
 
     // Log for debugging
@@ -153,10 +207,14 @@ function menu_link_view_entity_delete($entity) {
     // Rebuild menu link plugin definitions
     \Drupal::service('plugin.manager.menu.link')->rebuild();
 
+    // Clear menu UI overview cached data
+    \Drupal::service('cache.render')->invalidateAll();
+
     // Invalidate necessary cache tags
     Cache::invalidateTags([
       'menu:' . $entity->getMenuName(),
-      'config:system.menu.' . $entity->getMenuName()
+      'config:system.menu.' . $entity->getMenuName(),
+      'menu_link_content_list'
     ]);
 
     // Log for debugging
@@ -164,14 +222,6 @@ function menu_link_view_entity_delete($entity) {
       '@id' => $entity->id()
     ]);
   }
-}
-
-/**
- * Implements hook_cron().
- */
-function menu_link_view_cron() {
-  // Once per cron run, rebuild menu links to ensure they're properly registered
-  \Drupal::service('plugin.manager.menu.link')->rebuild();
 }
 
 /**

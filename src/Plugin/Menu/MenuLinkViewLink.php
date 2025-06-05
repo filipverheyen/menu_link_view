@@ -136,12 +136,6 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
         $plugin_id = $this->getPluginId();
         if (is_string($plugin_id) && !empty($plugin_id)) {
           $this->staticOverride->saveOverride($plugin_id, $overrides);
-
-          // Log the override.
-          \Drupal::logger('menu_link_view')->info('Saved override for @id: @overrides', [
-            '@id' => $plugin_id,
-            '@overrides' => json_encode($overrides),
-          ]);
         }
       }
       catch (\Exception $e) {
@@ -279,6 +273,14 @@ class MenuLinkViewLink extends MenuLinkBase implements ContainerFactoryPluginInt
   public function getCacheTags() {
     $entity_id = $this->extractEntityIdFromPluginId();
     return ['config:menu_link_view.menu_link_view.' . $entity_id];
+  }
+
+  /**
+   * CRITICAL: This method tells Drupal that this link can be manipulated in the UI.
+   * Without it, the link won't appear in the draggable list.
+   */
+  public function isHidden() {
+    return FALSE;
   }
 
 }

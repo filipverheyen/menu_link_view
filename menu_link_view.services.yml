@@ -2,3 +2,8 @@ services:
   menu_link_view.expander:
     class: Drupal\menu_link_view\MenuLinkViewExpander
     arguments: ["@entity_type.manager", "@menu.link_tree"]
+  menu_link_view.ui_registrar:
+    class: Drupal\menu_link_view\MenuLinkViewUIRegistrar
+    arguments: ["@entity_type.manager", "@plugin.manager.menu.link"]
+    tags:
+      - { name: event_subscriber }
