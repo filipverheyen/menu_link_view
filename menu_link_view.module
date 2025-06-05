@@ -115,20 +115,19 @@ function menu_link_view_entity_operation_alter(array &$operations, EntityInterfa
 
 /**
  * Implements hook_menu_local_actions_alter().
- *
- * In Drupal 11, we use this to modify the action buttons that appear above the content.
  */
 function menu_link_view_menu_local_actions_alter(&$local_actions) {
-  $route_name = \Drupal::routeMatch()->getRouteName();
+  // Check if we have menu_link_content entity in the route
+  $route_match = \Drupal::routeMatch();
+  $menu_link = $route_match->getParameter('menu_link_content');
 
-  if ($route_name === 'entity.menu_link_content.canonical') {
-    $menu_link = \Drupal::routeMatch()->getParameter('menu_link_content');
-    if ($menu_link) {
-      $options = $menu_link->get('link')->options ?? [];
-      if (!empty($options['menu_link_view'])) {
-        // Remove the "Add child" action if it exists
-        if (isset($local_actions['entity.menu_link_content.add_form'])) {
-          unset($local_actions['entity.menu_link_content.add_form']);
+  if ($menu_link) {
+    $options = $menu_link->get('link')->options ?? [];
+    if (!empty($options['menu_link_view'])) {
+      // This is a view menu item - remove all actions that contain add/create
+      foreach ($local_actions as $key => $action) {
+        if (preg_match('/(add|create)/i', $key)) {
+          unset($local_actions[$key]);
         }
       }
     }
@@ -630,5 +629,69 @@ function menu_link_view_menu_links_discovered_alter(&$links) {
       }
     }
   }
+}
+
+/**
+ * Implements hook_element_info_alter().
+ *
+ * This hook is executed before operations are added to the dropbutton elements.
+ */
+function menu_link_view_element_info_alter(array &$info) {
+  if (isset($info['dropbutton'])) {
+    // Add a pre-render function to filter out operations for view menu items
+    $info['dropbutton']['#pre_render'][] = 'menu_link_view_dropbutton_pre_render';
+  }
+}
+
+/**
+ * Pre-render callback for dropbutton elements.
+ *
+ * This runs before the dropbutton is rendered, allowing us to remove operations.
+ */
+function menu_link_view_dropbutton_pre_render($element) {
+  // Only process if we have links
+  if (!isset($element['#links']) || !is_array($element['#links'])) {
+    return $element;
+  }
+
+  // Check if we have a plugin ID in the element or its parents
+  $plugin_id = NULL;
+
+  // Try to find plugin ID in the element attributes
+  if (isset($element['#attributes']['data-plugin-id'])) {
+    $plugin_id = $element['#attributes']['data-plugin-id'];
+  }
+  // Look through parent element if available
+  elseif (isset($element['#dropbutton_parents'])) {
+    $parents = $element['#dropbutton_parents'];
+    $parent = reset($parents);
+
+    if (isset($parent['#wrapper_attributes']['data-plugin-id'])) {
+      $plugin_id = $parent['#wrapper_attributes']['data-plugin-id'];
+    }
+    elseif (isset($parent['#attributes']['data-plugin-id'])) {
+      $plugin_id = $parent['#attributes']['data-plugin-id'];
+    }
+    elseif (isset($parent['#item']) && method_exists($parent['#item'], 'getPluginId')) {
+      $plugin_id = $parent['#item']->getPluginId();
+    }
+  }
+
+  // If we found a plugin ID, check if it's a view menu item
+  if ($plugin_id) {
+    /** @var \Drupal\menu_link_view\MenuLinkViewMenuHandler $menu_handler */
+    $menu_handler = \Drupal::service('menu_link_view.menu_handler');
+
+    if ($menu_handler->isViewMenuItem($plugin_id)) {
+      // Filter out any add/create operations
+      foreach ($element['#links'] as $key => $link) {
+        if (preg_match('/(add|create|translate)/i', $key)) {
+          unset($element['#links'][$key]);
+        }
+      }
+    }
+  }
+
+  return $element;
 }
 

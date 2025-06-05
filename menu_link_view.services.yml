@@ -2,3 +2,6 @@ services:
   menu_link_view.renderer:
     class: Drupal\menu_link_view\MenuLinkViewRenderer
     arguments: ["@entity_type.manager", "@renderer"]
+  menu_link_view.menu_handler:
+    class: Drupal\menu_link_view\MenuLinkViewMenuHandler
+    arguments: ["@entity_type.manager"]
