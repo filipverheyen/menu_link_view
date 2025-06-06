@@ -19,6 +19,8 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Render\Element;
 use Drupal\menu_link_view\MenuLinkViewExpander;
+use Drupal\Core\Menu\MenuLinkTreeElement;
+use Drupal\Core\Menu\MenuLinkInterface;
 
 /**
  * Implements hook_help().
@@ -693,4 +695,104 @@ function menu_link_view_preprocess_menu_link(&$variables) {
       $variables['attributes']['class'][] = 'menu-item--active-trail';
     }
   }
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for menu_edit_form.
+ */
+function menu_link_view_form_menu_edit_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  $form['#after_build'][] = 'menu_link_view_menu_form_after_build';
+}
+
+/**
+ * After-build callback for the menu edit form.
+ *
+ * This runs after the operations have been added to the form.
+ */
+function menu_link_view_menu_form_after_build($form, FormStateInterface $form_state) {
+  // No menu links to process
+  if (empty($form['links']['links'])) {
+    return $form;
+  }
+
+  // Create a library for our admin styles if it's needed
+  $add_library = FALSE;
+
+  // Process each menu item
+  foreach (Element::children($form['links']['links']) as $id) {
+    if (!isset($form['links']['links'][$id]['#item'])) {
+      continue;
+    }
+
+    $item = $form['links']['links'][$id]['#item'];
+
+    // Check if this is a view link menu item
+    if (_menu_link_view_is_view_link($item)) {
+      // Add our custom admin styling
+      $add_library = TRUE;
+
+      // Add a class to the menu item for styling
+      if (!isset($form['links']['links'][$id]['#attributes']['class'])) {
+        $form['links']['links'][$id]['#attributes']['class'] = [];
+      }
+      $form['links']['links'][$id]['#attributes']['class'][] = 'menu-link-view-item';
+
+      // Check for operations
+      if (isset($form['links']['links'][$id]['operations']['#links'])) {
+        // Remove the 'add' operation if it exists
+        if (isset($form['links']['links'][$id]['operations']['#links']['add'])) {
+          unset($form['links']['links'][$id]['operations']['#links']['add']);
+        }
+      }
+    }
+  }
+
+  // If we modified any items, attach our library
+  if ($add_library) {
+    $form['#attached']['library'][] = 'menu_link_view/admin';
+  }
+
+  return $form;
+}
+
+/**
+ * Helper function to determine if a menu item is a view link.
+ *
+ * @param mixed $menu_item
+ *   The menu item to check - can be either a MenuLinkInterface or MenuLinkTreeElement.
+ *
+ * @return bool
+ *   TRUE if this is a menu view link, FALSE otherwise.
+ */
+function _menu_link_view_is_view_link($menu_item) {
+  if (!$menu_item) {
+    return FALSE;
+  }
+
+  // Handle both MenuLinkInterface and MenuLinkTreeElement
+  $menu_link = NULL;
+
+  if ($menu_item instanceof MenuLinkTreeElement) {
+    $menu_link = $menu_item->link;
+  }
+  elseif ($menu_item instanceof MenuLinkInterface) {
+    $menu_link = $menu_item;
+  }
+  else {
+    // Not a menu link we can check
+    return FALSE;
+  }
+
+  // Check for our provider
+  if ($menu_link && $menu_link->getProvider() == 'menu_link_view') {
+    return TRUE;
+  }
+
+  // Or check the options for menu_link_view data
+  $options = $menu_link->getOptions();
+  if (!empty($options['menu_link_view'])) {
+    return TRUE;
+  }
+
+  return FALSE;
 }

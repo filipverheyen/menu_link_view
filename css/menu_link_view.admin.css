@@ -23,14 +23,14 @@
   position: relative;
 }
 
-.menu-link-view-item .tabledrag-handle .handle::after {
+/* .menu-link-view-item .tabledrag-handle .handle::after {
   content: "✕";
   position: absolute;
   color: #e63946;
   font-size: 10px;
   right: 0;
   bottom: 0;
-}
+} */
 
 /* Style for item hovering over a no-child-allowed item */
 tr.tabledrag-leaf.drag-hover-no-drop {
@@ -54,4 +54,22 @@ tr.tabledrag-leaf.drag-hover-no-drop {
 .menu-link-view-item .dropbutton-wrapper .dropbutton-widget a[href*="edit"],
 .menu-link-view-item .dropbutton-wrapper .dropbutton-widget a[href*="delete"] {
   display: inline-block !important;
+}
+
+/**
+ * Styles for Menu Link View admin interface.
+ */
+
+.menu-link-view-note {
+  color: #e62600;
+  font-size: 0.85em;
+  margin-top: 0.5em;
+  max-width: 250px;
+}
+
+/* Add a special indicator for menu view links in the admin UI */
+.menu-link-view-item {
+  background-color: rgba(0, 152, 218, 0.1);
+  border-left: 3px solid #0098da;
+  padding-left: 5px;
 }

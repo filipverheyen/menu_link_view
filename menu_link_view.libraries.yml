@@ -4,7 +4,7 @@ menu_link_view:
     theme:
       css/menu_link_view.css: {}
 
-menu-admin:
+admin:
   version: 1.x
   js:
     js/menu_link_view.admin.js: {}
