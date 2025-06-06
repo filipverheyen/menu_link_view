@@ -670,32 +670,262 @@ function menu_link_view_preprocess_menu_link(&$variables) {
   if (isset($variables['element']['#original_link']) &&
       $variables['element']['#original_link'] instanceof \Drupal\menu_link_view\SyntheticMenuLink) {
 
-    // Make sure we have classes array
+    // Get the needed values from our link
+    $menu_link = $variables['element']['#original_link'];
+    $menu_name = $menu_link->getMenuName();
+    $is_active_trail = !empty($variables['element']['#in_active_trail']);
+    $level = isset($variables['element']['#level']) ? $variables['element']['#level'] : 1;
+
+    // Initialize attributes if needed
+    if (!isset($variables['attributes'])) {
+      $variables['attributes'] = [];
+    }
+
+    // Initialize classes array if needed
     if (!isset($variables['attributes']['class'])) {
       $variables['attributes']['class'] = [];
     }
 
-    // Add standard Drupal menu item classes
-    $variables['attributes']['class'][] = 'menu-item';
+    // Try to find menu item attributes to copy from
+    $sample_attributes = _menu_link_view_get_sample_attributes($level, $menu_name);
 
-    // Add menu name specific class
-    if (!empty($variables['element']['#original_link']->getMenuName())) {
-      $menu_name = $variables['element']['#original_link']->getMenuName();
-      $variables['attributes']['class'][] = 'menu-item--' . str_replace('_', '-', $menu_name);
+    // Apply the sample attributes first, if found
+    if (!empty($sample_attributes)) {
+      foreach ($sample_attributes as $attr_name => $attr_value) {
+        // Don't overwrite already set attributes
+        if (!isset($variables['attributes'][$attr_name])) {
+          $variables['attributes'][$attr_name] = $attr_value;
+        }
+        // Merge classes if they exist
+        elseif ($attr_name === 'class' && is_array($attr_value)) {
+          $variables['attributes']['class'] = array_merge(
+            $variables['attributes']['class'],
+            $attr_value
+          );
+          // Remove duplicates
+          $variables['attributes']['class'] = array_unique($variables['attributes']['class']);
+        }
+      }
+    }
+    // Apply fallback attributes if no sample was found
+    else {
+      // Base fallback classes that standard Drupal menus use
+      $variables['attributes']['class'][] = 'menu-item';
+      $variables['attributes']['class'][] = 'menu-item--level-' . $level;
+
+      if ($menu_name) {
+        $variables['attributes']['class'][] = 'menu-item--' . str_replace('_', '-', $menu_name);
+      }
+
+      // Add data attributes that Drupal core typically uses
+      $variables['attributes']['role'] = 'presentation';
+      $variables['attributes']['data-menu-level'] = $level;
     }
 
-    // Add our special class
-    $variables['attributes']['class'][] = 'menu-item--view-generated';
+    // These classes should always be applied regardless of whether we found a sample
 
-    // Set proper role for accessibility
-    $variables['attributes']['role'] = 'presentation';
-
-    // Check if this item is in the active trail
-    if (!empty($variables['element']['#in_active_trail'])) {
+    // Add active and active-trail classes
+    if ($is_active_trail) {
       $variables['attributes']['class'][] = 'menu-item--active-trail';
+    }
+
+    // Check if this specific link is active
+    $current_path = \Drupal::request()->getRequestUri();
+    $link_url = '';
+
+    try {
+      $link_url = $menu_link->getUrlObject()->toString();
+    }
+    catch (\Exception $e) {
+      // Just continue if we can't get the URL
+    }
+
+    if ($link_url !== '' && $current_path === $link_url) {
+      $variables['attributes']['class'][] = 'menu-item--active';
+      // Add aria-current attribute for accessibility
+      $variables['attributes']['aria-current'] = 'page';
+    }
+
+    // Add our special class at the end, but make it non-obtrusive
+    $variables['attributes']['class'][] = 'menu-item--view-generated';
+  }
+}
+
+/**
+ * Helper function to get sample attributes from existing menu items.
+ *
+ * @param int $level
+ *   The menu level to look for.
+ * @param string $menu_name
+ *   (optional) The menu name to look for.
+ *
+ * @return array
+ *   The sample attributes array, or empty array if none found.
+ */
+function _menu_link_view_get_sample_attributes($level, $menu_name = NULL) {
+  // Step 1: Try to get from the current page's render array
+  $items = _menu_link_view_get_menu_items_from_page();
+
+  // Step 2: If no items found, try to generate a sample menu item
+  if (empty($items) && \Drupal::hasContainer()) {
+    // Create a fake menu item to extract attributes
+    $items = _menu_link_view_get_simulated_menu_item($level, $menu_name);
+  }
+
+  // Step 3: Look for a matching menu item with the requested level
+  foreach ($items as $item) {
+    // Match by level and optionally menu name
+    if (isset($item['level']) && $item['level'] == $level) {
+      // If a menu name was specified, match that too
+      if ($menu_name && isset($item['menu_name']) && $item['menu_name'] != $menu_name) {
+        continue;
+      }
+
+      // Found a match
+      return $item['attributes'] ?? [];
+    }
+  }
+
+  // Step 4: If no exact matches, return any found item's attributes or empty array
+  return !empty($items[0]['attributes']) ? $items[0]['attributes'] : [];
+}
+
+/**
+ * Helper function to extract menu items from the current page render array.
+ *
+ * @return array
+ *   An array of menu items with their attributes.
+ */
+function _menu_link_view_get_menu_items_from_page() {
+  static $items = NULL;
+
+  // Only scan once per page load
+  if ($items !== NULL) {
+    return $items;
+  }
+
+  $items = [];
+
+  // Try to get from the current page's render array
+  // This is used as a sample to copy attributes from
+  $render_arrays = &drupal_static('drupal_render');
+  if (empty($render_arrays)) {
+    return $items;
+  }
+
+  // Look through the render arrays for menu items
+  foreach ($render_arrays as $id => $array) {
+    if (isset($array['#theme']) && $array['#theme'] == 'menu') {
+      if (!empty($array['#items'])) {
+        _menu_link_view_extract_menu_item_attributes($array['#items'], $items, 1, $array['#menu_name'] ?? NULL);
+      }
+    }
+  }
+
+  return $items;
+}
+
+/**
+ * Helper function to create a simulated menu item for attribute extraction.
+ *
+ * This creates a temporary menu item render array to extract the default
+ * attributes that Drupal's menu system would apply.
+ *
+ * @param int $level
+ *   The menu level to simulate.
+ * @param string $menu_name
+ *   (optional) The menu name to use.
+ *
+ * @return array
+ *   Array containing the simulated menu item with attributes.
+ */
+function _menu_link_view_get_simulated_menu_item($level, $menu_name = NULL) {
+  // Use a temporary menu name if none provided
+  $menu_name = $menu_name ?: 'main';
+
+  // Create a simple menu link
+  $url = Url::fromRoute('<front>');
+  $title = 'Simulated menu item';
+
+  // Build a simulated menu link tree element
+  $element = [
+    '#theme' => 'menu_link',
+    '#title' => $title,
+    '#url' => $url,
+    '#attributes' => [],
+    '#below' => [],
+    '#level' => $level,
+    '#menu_name' => $menu_name,
+  ];
+
+  // Use Drupal's core menu theme implementation to render it
+  $menu_template = \Drupal::service('theme.registry')->get('menu_link__' . $menu_name) ??
+                  \Drupal::service('theme.registry')->get('menu_link');
+
+  // Build a temporary render array using the menu item
+  $variables = [];
+  if (isset($menu_template['variables'])) {
+    foreach ($menu_template['variables'] as $key => $value) {
+      $variables[$key] = $element['#' . $key] ?? $value;
+    }
+  }
+
+  // If there's a preprocess function for menu links, call it to populate default attributes
+  if (function_exists('template_preprocess_menu_link')) {
+    template_preprocess_menu_link($variables);
+  }
+
+  // Return the processed attributes
+  return [
+    [
+      'level' => $level,
+      'menu_name' => $menu_name,
+      'attributes' => $variables['attributes'] ?? [],
+    ]
+  ];
+}
+
+/**
+ * Helper function to extract attributes from a menu tree.
+ *
+ * @param array $tree
+ *   The menu tree structure.
+ * @param array &$items
+ *   Reference to the array where extracted items will be stored.
+ * @param int $level
+ *   The current level in the tree.
+ * @param string $menu_name
+ *   (optional) The name of the menu.
+ */
+function _menu_link_view_extract_menu_item_attributes(array $tree, array &$items, $level = 1, $menu_name = NULL) {
+  foreach ($tree as $key => $item) {
+    // Only process actual menu items
+    if (!is_numeric($key)) {
+      continue;
+    }
+
+    // Skip our synthetic items
+    if (isset($item['original_link']) &&
+        $item['original_link'] instanceof \Drupal\menu_link_view\SyntheticMenuLink) {
+      continue;
+    }
+
+    // Extract the attributes
+    if (isset($item['attributes'])) {
+      $items[] = [
+        'level' => $level,
+        'menu_name' => $menu_name,
+        'attributes' => $item['attributes'],
+      ];
+    }
+
+    // Process child items
+    if (!empty($item['below'])) {
+      _menu_link_view_extract_menu_item_attributes($item['below'], $items, $level + 1, $menu_name);
     }
   }
 }
+
 
 /**
  * Implements hook_form_FORM_ID_alter() for menu_edit_form.
@@ -796,3 +1026,4 @@ function _menu_link_view_is_view_link($menu_item) {
 
   return FALSE;
 }
+

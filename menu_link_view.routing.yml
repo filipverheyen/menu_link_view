@@ -49,3 +49,4 @@ menu_link_view.rebuild:
     _title: "Rebuild menu link views"
   requirements:
     _permission: "administer menu"
+#

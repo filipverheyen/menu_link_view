@@ -10,3 +10,4 @@ menu_link_view.rebuild:
   title: "Rebuild menu link views"
   appears_on:
     - entity.menu.collection
+#

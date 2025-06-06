@@ -3,3 +3,4 @@ menu_link_view.overview:
   description: "Configure menu links from views."
   parent: system.admin_structure
   route_name: entity.menu_link_view.collection
+#
