@@ -63,14 +63,3 @@ Menu Link View dynamically replaces designated menu items with links generated f
 ### Missing styling or active trail
 * Clear the theme cache
 * Check your theme's menu template for compatibility with standard Drupal menu classes
-
-## MAINTAINERS
-
-* Filip Verheyen (filipverheyen) - https://github.com/filipverheyen
-
-## DEVELOPMENT
-
-This module is developed on GitHub:
-https://github.com/filipverheyen/menu_link_view
-
-Issues and pull requests are welcome.
