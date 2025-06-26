@@ -6,12 +6,10 @@ services:
   menu_link_view.menu_expander:
     class: Drupal\menu_link_view\MenuLinkViewExpander
     arguments:
-      [
-        "@entity_type.manager",
-        "@plugin.manager.menu.link",
-        "@language_manager",
-        "@cache.default",
-        "@logger.factory",
-        "@path.matcher",
-        "@request_stack",
-      ]
+      - "@entity_type.manager"
+      - "@plugin.manager.menu.link"
+      - "@language_manager"
+      - "@cache.default"
+      - "@logger.factory"
+      - "@path.matcher"
+      - "@request_stack"

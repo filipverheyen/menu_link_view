@@ -4,8 +4,7 @@
  * @file
  * Contains menu_link_view.module.
  *
- * Updated: 2025-06-05
- * By: filipverheyen
+ * Updated: 2025-06-26
  * Drupal 11 compatible implementation
  */
 
@@ -15,12 +14,9 @@ use Drupal\Core\Form\FormStateInterface;
 use Drupal\menu_link_content\Entity\MenuLinkContent;
 use Drupal\Core\Url;
 use Drupal\Core\Entity\EntityInterface;
-use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Render\Element;
 use Drupal\menu_link_view\MenuLinkViewExpander;
-use Drupal\Core\Menu\MenuLinkTreeElement;
-use Drupal\Core\Menu\MenuLinkInterface;
 
 /**
  * Implements hook_help().
@@ -30,40 +26,9 @@ function menu_link_view_help($route_name, RouteMatchInterface $route_match) {
     case 'help.page.menu_link_view':
       $output = '';
       $output .= '<h3>' . t('About') . '</h3>';
-      $output .= '<p>' . t('The Menu Link View module allows you to add views as menu items.') . '</p>';
+      $output .= '<p>' . t('The Menu Link View module allows you to add views as menu items that dynamically expand based on view results.') . '</p>';
       return $output;
   }
-}
-
-/**
- * Implements hook_entity_operation().
- *
- * In Drupal 11, this is preferred over hook_entity_operation_alter().
- */
-function menu_link_view_entity_operation(EntityInterface $entity) {
-  $operations = [];
-
-  if ($entity->getEntityTypeId() == 'menu_link_content') {
-    $options = $entity->get('link')->options ?? [];
-    if (!empty($options['menu_link_view']) && !empty($options['menu_link_view']['entity_id'])) {
-      $entity_id = $options['menu_link_view']['entity_id'];
-
-      // Provide our operations directly
-      $operations['edit'] = [
-        'title' => t('Edit view link'),
-        'weight' => 10,
-        'url' => Url::fromRoute('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]),
-      ];
-
-      $operations['delete'] = [
-        'title' => t('Delete view link'),
-        'weight' => 100,
-        'url' => Url::fromRoute('entity.menu_link_view.delete_form', ['menu_link_view' => $entity_id]),
-      ];
-    }
-  }
-
-  return $operations;
 }
 
 /**
@@ -93,23 +58,12 @@ function menu_link_view_entity_operation_alter(array &$operations, EntityInterfa
         );
       }
 
-      // Remove translate operation if it exists
-      if (isset($operations['translate'])) {
-        unset($operations['translate']);
-      }
-
-      // Remove add operation if it exists
-      if (isset($operations['add'])) {
-        unset($operations['add']);
-      }
-
-      // IMPORTANT: In Drupal admin UI these operations might be named differently
-      if (isset($operations['add-child'])) {
-        unset($operations['add-child']);
-      }
-
-      if (isset($operations['add_child'])) {
-        unset($operations['add_child']);
+      // Remove operations that don't make sense for view links
+      $operations_to_remove = ['translate', 'add', 'add-child', 'add_child'];
+      foreach ($operations_to_remove as $op_to_remove) {
+        if (isset($operations[$op_to_remove])) {
+          unset($operations[$op_to_remove]);
+        }
       }
     }
   }
@@ -120,18 +74,24 @@ function menu_link_view_entity_operation_alter(array &$operations, EntityInterfa
  */
 function menu_link_view_form_alter(&$form, FormStateInterface $form_state, $form_id) {
   if ($form_id == 'menu_edit_form') {
-    // Add our custom JS to prevent children for view items
-    $form['#attached']['library'][] = 'menu_link_view/menu-admin';
+    \Drupal::logger('menu_link_view')->info('Form alter called for menu_edit_form');
+
+    // Add our custom JS/CSS to prevent children for view items
+    $form['#attached']['library'][] = 'menu_link_view/admin';
 
     // Add our custom validate handler to prevent children server-side
     $form['#validate'][] = 'menu_link_view_menu_edit_form_validate';
 
-    // In Drupal 11, operations are built differently, we need to use #process
-    // to alter them after they're built by the form API
-    $form['links']['links']['#process'][] = 'menu_link_view_process_menu_links';
+    // Process menu links after they're built
+    $form['#after_build'][] = 'menu_link_view_menu_form_after_build';
+
+    // CRITICAL: Add a custom rebuild handler to fix the form during rebuild
+    $form['#process'][] = 'menu_link_view_process_form_rebuild';
+
+    \Drupal::logger('menu_link_view')->info('Added validation and process handlers to menu form');
   }
 
-  // For menu link content forms, prevent editing for our view items
+  // Redirect editing of view menu items to our custom form
   if ($form_id === 'menu_link_content_menu_link_content_form' && isset($form['#entity'])) {
     $menu_link = $form['#entity'];
     $options = $menu_link->get('link')->options ?? [];
@@ -151,192 +111,336 @@ function menu_link_view_form_alter(&$form, FormStateInterface $form_state, $form
 }
 
 /**
- * Process callback for menu links in the menu edit form.
- *
- * This is a Drupal 11 approach to modify the operations for each menu item.
+ * Process callback to fix invalid relationships during form rebuild.
  */
-function menu_link_view_process_menu_links($element) {
-  // Process all menu items
-  foreach (Element::children($element) as $key) {
-    // Skip non-item array elements
-    if (strpos($key, '#') === 0) {
+function menu_link_view_process_form_rebuild($form, FormStateInterface $form_state) {
+  \Drupal::logger('menu_link_view')->info('=== PROCESS REBUILD START ===');
+
+  // Check if we're in a rebuild after validation errors
+  $errors = $form_state->getErrors();
+  if (empty($errors)) {
+    \Drupal::logger('menu_link_view')->info('Process: No validation errors, skipping rebuild fix');
+    return $form;
+  }
+
+  // Check if any of the errors are our menu link view errors
+  $has_menu_link_view_errors = FALSE;
+  foreach ($errors as $error) {
+    if (strpos($error->__toString(), 'view menu item') !== FALSE) {
+      $has_menu_link_view_errors = TRUE;
+      break;
+    }
+  }
+
+  if (!$has_menu_link_view_errors) {
+    \Drupal::logger('menu_link_view')->info('Process: No menu link view errors, skipping rebuild fix');
+    return $form;
+  }
+
+  \Drupal::logger('menu_link_view')->info('Process: Found menu link view validation errors, fixing form during rebuild');
+
+  // Get view menu items
+  $view_menu_items = _menu_link_view_get_view_menu_items();
+
+  // Fix the user input during rebuild
+  $user_input = $form_state->getUserInput();
+  if (!empty($user_input['links'])) {
+    $fixed_input = $user_input;
+    $made_fixes = FALSE;
+
+    foreach ($fixed_input['links'] as $id => &$item) {
+      if (is_string($id) && !empty($item['parent']) && isset($view_menu_items[$item['parent']])) {
+        \Drupal::logger('menu_link_view')->warning('PROCESS REBUILD: Fixing user input for @id (removing parent @parent)', [
+          '@id' => $id,
+          '@parent' => $item['parent']
+        ]);
+        $item['parent'] = '';
+        $made_fixes = TRUE;
+      }
+    }
+
+    if ($made_fixes) {
+      $form_state->setUserInput($fixed_input);
+      \Drupal::logger('menu_link_view')->info('PROCESS REBUILD: Updated user input to fix invalid relationships');
+    }
+  }
+
+  \Drupal::logger('menu_link_view')->info('=== PROCESS REBUILD END ===');
+  return $form;
+}
+
+/**
+ * After-build callback for the menu edit form.
+ */
+function menu_link_view_menu_form_after_build($form, FormStateInterface $form_state) {
+  if (empty($form['links']['links'])) {
+    return $form;
+  }
+
+  // Check if we cleared the user input in validation
+  if ($form_state->get('menu_link_view_cleared_input')) {
+    \Drupal::logger('menu_link_view')->info('AFTER-BUILD: Detected cleared input flag, adding warning message');
+
+    // Add a helpful message to the user
+    \Drupal::messenger()->addWarning(t('The invalid menu structure has been reset. Please rearrange your menu items as needed and save again.'));
+
+    // Clear the flag so it doesn't repeat
+    $form_state->set('menu_link_view_cleared_input', FALSE);
+  }
+
+  // Get view menu items for comparison
+  $view_menu_items = _menu_link_view_get_view_menu_items();
+
+  \Drupal::logger('menu_link_view')->info('=== AFTER-BUILD START ===');
+  \Drupal::logger('menu_link_view')->info('After-build processing form with @count view items', [
+    '@count' => count($view_menu_items)
+  ]);
+
+  // Process each menu item to identify view links
+  foreach (Element::children($form['links']['links']) as $id) {
+    if (!isset($form['links']['links'][$id]['#item'])) {
       continue;
     }
 
-    $item = &$element[$key];
+    $item = $form['links']['links'][$id]['#item'];
 
-    // Check if this is a view menu item by looking at the title
-    if (isset($item['title']['#markup']) && strpos($item['title']['#markup'], '[View]') !== FALSE) {
-      // Extract the menu_link_content entity from the form item
-      if (isset($item['#item'])) {
-        $plugin_id = $item['#item']->getPluginId();
-        if (strpos($plugin_id, 'menu_link_content:') === 0) {
-          $uuid = substr($plugin_id, strlen('menu_link_content:'));
+    // Check if this is a view link menu item
+    if (_menu_link_view_is_view_link($item)) {
+      // Add a class to the menu item for styling
+      if (!isset($form['links']['links'][$id]['#attributes']['class'])) {
+        $form['links']['links'][$id]['#attributes']['class'] = [];
+      }
+      $form['links']['links'][$id]['#attributes']['class'][] = 'menu-link-view-item';
 
-          // Get the menu_link_content entity
-          $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
-          $entities = $storage->loadByProperties(['uuid' => $uuid]);
-          $menu_link = reset($entities);
-
-          if ($menu_link) {
-            $options = $menu_link->get('link')->options ?? [];
-            if (!empty($options['menu_link_view']) && !empty($options['menu_link_view']['entity_id'])) {
-              $entity_id = $options['menu_link_view']['entity_id'];
-
-              // Add a special class to identify view items
-              $item['#attributes']['class'][] = 'menu-link-view-item';
-              $item['#attributes']['data-menu-link-view'] = 'true';
-
-              // Handle operations in various formats
-
-              // Handle operations as 'operations' element (D10/D11 format)
-              if (isset($item['operations']['#type']) && $item['operations']['#type'] === 'operations') {
-                // Remove add operations
-                if (isset($item['operations']['#links']['add'])) {
-                  unset($item['operations']['#links']['add']);
-                }
-
-                if (isset($item['operations']['#links']['add-child'])) {
-                  unset($item['operations']['#links']['add-child']);
-                }
-
-                if (isset($item['operations']['#links']['add_child'])) {
-                  unset($item['operations']['#links']['add_child']);
-                }
-
-                // Remove translate operation
-                if (isset($item['operations']['#links']['translate'])) {
-                  unset($item['operations']['#links']['translate']);
-                }
-
-                // Replace edit operation
-                if (isset($item['operations']['#links']['edit'])) {
-                  $item['operations']['#links']['edit'] = [
-                    'title' => t('Edit view link'),
-                    'url' => Url::fromRoute('entity.menu_link_view.edit_form', ['menu_link_view' => $entity_id]),
-                  ];
-                }
-
-                // Replace delete operation
-                if (isset($item['operations']['#links']['delete'])) {
-                  $item['operations']['#links']['delete']['url'] = Url::fromRoute(
-                    'entity.menu_link_view.delete_form',
-                    ['menu_link_view' => $entity_id]
-                  );
-                }
-              }
-              // Handle operations as dropbutton element
-              elseif (isset($item['operations']['#type']) && $item['operations']['#type'] === 'dropbutton') {
-                if (isset($item['operations']['#links'])) {
-                  foreach (['add', 'add-child', 'add_child', 'translate'] as $op_to_remove) {
-                    if (isset($item['operations']['#links'][$op_to_remove])) {
-                      unset($item['operations']['#links'][$op_to_remove]);
-                    }
-                  }
-                }
-              }
-              // Handle operations as individual buttons
-              elseif (isset($item['operations'])) {
-                // Remove unwanted operations
-                foreach (['add', 'add-child', 'add_child', 'translate'] as $op_to_remove) {
-                  if (isset($item['operations'][$op_to_remove])) {
-                    unset($item['operations'][$op_to_remove]);
-                  }
-                }
-
-                // Replace edit operation
-                if (isset($item['operations']['edit'])) {
-                  $item['operations']['edit']['#title'] = t('Edit view link');
-                  $item['operations']['edit']['#url'] = Url::fromRoute(
-                    'entity.menu_link_view.edit_form',
-                    ['menu_link_view' => $entity_id]
-                  );
-                }
-
-                // Replace delete operation
-                if (isset($item['operations']['delete'])) {
-                  $item['operations']['delete']['#url'] = Url::fromRoute(
-                    'entity.menu_link_view.delete_form',
-                    ['menu_link_view' => $entity_id]
-                  );
-                }
-              }
-            }
+      // Remove unwanted operations from the operations links
+      if (isset($form['links']['links'][$id]['operations']['#links'])) {
+        $operations_to_remove = ['add', 'add-child', 'add_child', 'translate'];
+        foreach ($operations_to_remove as $op) {
+          if (isset($form['links']['links'][$id]['operations']['#links'][$op])) {
+            unset($form['links']['links'][$id]['operations']['#links'][$op]);
           }
         }
       }
     }
   }
 
-  return $element;
+  \Drupal::logger('menu_link_view')->info('=== AFTER-BUILD END ===');
+  return $form;
 }
 
 /**
  * Validation handler for menu edit form to prevent children for view menu items.
  */
 function menu_link_view_menu_edit_form_validate($form, FormStateInterface $form_state) {
-  // Get the user input for menu parent selections
-  $parents = $form_state->getValue('links');
+  \Drupal::logger('menu_link_view')->info('=== VALIDATION START ===');
 
-  if (empty($parents)) {
+  $values = $form_state->getValues();
+
+  if (empty($values['links'])) {
+    \Drupal::logger('menu_link_view')->info('No links in form values');
     return;
   }
 
   // Get all our view menu items
-  $view_menu_items = [];
-  $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+  $view_menu_items = _menu_link_view_get_view_menu_items();
+  \Drupal::logger('menu_link_view')->info('Found @count view menu items', ['@count' => count($view_menu_items)]);
 
-  // Use entity query with accessCheck set to FALSE
-  $query = $storage->getQuery();
-  $query->condition('title', '%[View]', 'LIKE');
-  $query->accessCheck(FALSE);
-  $ids = $query->execute();
+  $found_invalid_relationships = FALSE;
 
-  $menu_links = $storage->loadMultiple($ids);
-
-  // Store both plugin ID and actual label for all view menu items
-  foreach ($menu_links as $menu_link) {
-    $options = $menu_link->get('link')->options ?? [];
-    // Only if it's actually a view link item
-    if (isset($options['menu_link_view'])) {
-      $plugin_id = 'menu_link_content:' . $menu_link->uuid();
-      $view_menu_items[$plugin_id] = $menu_link->label();
-    }
-  }
-
-  // Check if any items are using a view menu item as parent
-  foreach ($parents as $id => $item) {
+  // Check for invalid relationships and show errors
+  foreach ($values['links'] as $id => $item) {
     if (is_string($id) && !empty($item['parent']) && isset($view_menu_items[$item['parent']])) {
-      // Get a clean item title
-      $item_title = '';
-      if (isset($form['links']['links'][$id]['title']['#markup'])) {
-        $item_title = $form['links']['links'][$id]['title']['#markup'];
-      } else {
-        // Try to load the item to get its title
-        if (strpos($id, 'menu_link_content:') === 0) {
-          $uuid = substr($id, strlen('menu_link_content:'));
-          $items = $storage->loadByProperties(['uuid' => $uuid]);
-          $menu_item = reset($items);
-          if ($menu_item) {
-            $item_title = $menu_item->label();
-          }
-        }
+      \Drupal::logger('menu_link_view')->warning('VALIDATION ERROR: @id trying to be child of @parent', [
+        '@id' => $id,
+        '@parent' => $item['parent']
+      ]);
 
-        // Fallback to ID if we couldn't get a title
-        if (empty($item_title)) {
-          $item_title = t('Menu item');
-        }
-      }
+      $found_invalid_relationships = TRUE;
+      $item_title = _menu_link_view_get_menu_item_title($id);
 
-      $form_state->setError(
-        $form['links']['links'][$id]['parent'],
-        t('The menu item %title cannot be placed under the view menu item %parent because view menu items cannot have children.', [
+      // Set error on the specific parent field
+      $form_state->setErrorByName(
+        "links][{$id}][parent",
+        t('The menu item %title cannot be placed under the view menu item %parent because view menu items expand into multiple items and cannot have children.', [
           '%title' => $item_title,
           '%parent' => $view_menu_items[$item['parent']],
         ])
       );
     }
   }
+
+  // NUCLEAR OPTION: If we found invalid relationships, clear ALL user input
+  // This will force the form to rebuild from database/default values only
+  if ($found_invalid_relationships) {
+    \Drupal::logger('menu_link_view')->warning('NUCLEAR OPTION: Clearing all user input to break persistence cycle');
+    $form_state->setUserInput([]);
+
+    // Also set a flag so we can detect this on rebuild
+    $form_state->set('menu_link_view_cleared_input', TRUE);
+  }
+
+  \Drupal::logger('menu_link_view')->info('=== VALIDATION END ===');
+}
+
+/**
+ * Helper function to immediately fix invalid parent relationships in the database.
+ */
+function _menu_link_view_fix_invalid_parent_in_database($menu_link_id, $invalid_parent_id) {
+  \Drupal::logger('menu_link_view')->info('Attempting to fix database for @id with invalid parent @parent', [
+    '@id' => $menu_link_id,
+    '@parent' => $invalid_parent_id
+  ]);
+
+  $uuid = NULL;
+
+  // Handle different menu link ID formats
+  if (strpos($menu_link_id, 'menu_plugin_id:menu_link_content:') === 0) {
+    // Format: menu_plugin_id:menu_link_content:UUID
+    $uuid = substr($menu_link_id, strlen('menu_plugin_id:menu_link_content:'));
+    \Drupal::logger('menu_link_view')->info('Extracted UUID from menu_plugin_id format: @uuid', ['@uuid' => $uuid]);
+  }
+  elseif (strpos($menu_link_id, 'menu_link_content:') === 0) {
+    // Format: menu_link_content:UUID
+    $uuid = substr($menu_link_id, strlen('menu_link_content:'));
+    \Drupal::logger('menu_link_view')->info('Extracted UUID from menu_link_content format: @uuid', ['@uuid' => $uuid]);
+  }
+  else {
+    \Drupal::logger('menu_link_view')->warning('Unknown menu link ID format: @id', ['@id' => $menu_link_id]);
+    return;
+  }
+
+  if (!$uuid) {
+    \Drupal::logger('menu_link_view')->error('Could not extract UUID from menu link ID: @id', ['@id' => $menu_link_id]);
+    return;
+  }
+
+  // Load and update the menu link content entity
+  $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+  $entities = $storage->loadByProperties(['uuid' => $uuid]);
+  $menu_link = reset($entities);
+
+  if ($menu_link) {
+    \Drupal::logger('menu_link_view')->info('Found menu link entity, current parent: @current_parent', [
+      '@current_parent' => $menu_link->getParentId()
+    ]);
+
+    // Reset the parent to empty (root level)
+    $menu_link->set('parent', '');
+    $menu_link->save();
+
+    \Drupal::logger('menu_link_view')->info('SUCCESSFULLY fixed invalid parent relationship in database for menu link @uuid', ['@uuid' => $uuid]);
+
+    // Clear menu cache to ensure the change is reflected immediately
+    \Drupal::service('cache_tags.invalidator')->invalidateTags(['config:system.menu.main']);
+    \Drupal::service('plugin.manager.menu.link')->rebuild();
+
+  } else {
+    \Drupal::logger('menu_link_view')->error('Could not load menu link entity with UUID @uuid', ['@uuid' => $uuid]);
+  }
+}
+
+/**
+ * Submit handler to clean up invalid parent relationships.
+ */
+function menu_link_view_menu_edit_form_submit($form, FormStateInterface $form_state) {
+  // Only run if there were validation errors
+  if ($form_state->getErrors()) {
+    return;
+  }
+
+  $values = $form_state->getValues();
+
+  if (empty($values['links'])) {
+    return;
+  }
+
+  // Get all our view menu items
+  $view_menu_items = _menu_link_view_get_view_menu_items();
+  $cleaned_values = $values;
+
+  // Clean up any invalid parent relationships that might have slipped through
+  foreach ($cleaned_values['links'] as $id => &$item) {
+    if (is_string($id) && !empty($item['parent']) && isset($view_menu_items[$item['parent']])) {
+      // Reset invalid parents
+      $item['parent'] = '';
+
+      // Log this cleanup
+      \Drupal::logger('menu_link_view')->info('Cleaned up invalid parent relationship for menu item @id', ['@id' => $id]);
+    }
+  }
+
+  // Update form state with cleaned values
+  $form_state->setValues($cleaned_values);
+}
+
+/**
+ * Helper function to get all view menu items.
+ */
+function _menu_link_view_get_view_menu_items() {
+  $view_menu_items = [];
+  $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+
+  $query = $storage->getQuery();
+  $query->condition('title', '%[View]', 'LIKE');
+  $query->accessCheck(FALSE);
+  $ids = $query->execute();
+
+  if (!empty($ids)) {
+    $menu_links = $storage->loadMultiple($ids);
+
+    foreach ($menu_links as $menu_link) {
+      $options = $menu_link->get('link')->options ?? [];
+      if (isset($options['menu_link_view'])) {
+        $plugin_id = 'menu_link_content:' . $menu_link->uuid();
+        $view_menu_items[$plugin_id] = $menu_link->label();
+      }
+    }
+  }
+
+  return $view_menu_items;
+}
+
+/**
+ * Helper function to get menu item title.
+ */
+function _menu_link_view_get_menu_item_title($id) {
+  if (strpos($id, 'menu_link_content:') === 0) {
+    $uuid = substr($id, strlen('menu_link_content:'));
+    $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
+    $entities = $storage->loadByProperties(['uuid' => $uuid]);
+    $menu_item = reset($entities);
+    if ($menu_item) {
+      return $menu_item->label();
+    }
+  }
+  return t('Menu item');
+}
+
+/**
+ * Helper function to determine if a menu item is a view link.
+ */
+function _menu_link_view_is_view_link($menu_item) {
+  if (!$menu_item) {
+    return FALSE;
+  }
+
+  $menu_link = NULL;
+  if ($menu_item instanceof \Drupal\Core\Menu\MenuLinkTreeElement) {
+    $menu_link = $menu_item->link;
+  } elseif ($menu_item instanceof \Drupal\Core\Menu\MenuLinkInterface) {
+    $menu_link = $menu_item;
+  } else {
+    return FALSE;
+  }
+
+  // Check for our provider
+  if ($menu_link && $menu_link->getProvider() == 'menu_link_view') {
+    return TRUE;
+  }
+
+  // Or check the options for menu_link_view data
+  $options = $menu_link->getOptions();
+  return !empty($options['menu_link_view']);
 }
 
 /**
@@ -367,7 +471,6 @@ function menu_link_view_entity_delete($entity) {
     // Find and delete any associated menu_link_content entities
     $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
 
-    // Find all links that might be associated
     $query = $storage->getQuery()
       ->condition('title', '%[View]', 'LIKE')
       ->accessCheck(FALSE);
@@ -379,21 +482,15 @@ function menu_link_view_entity_delete($entity) {
       foreach ($menu_links as $menu_link) {
         $options = $menu_link->get('link')->options ?? [];
 
-        // Check if this menu link is associated with our entity
         if (!empty($options['menu_link_view']) &&
             !empty($options['menu_link_view']['entity_id']) &&
             $options['menu_link_view']['entity_id'] == $entity->id()) {
-          // Delete the associated menu link content
           $menu_link->delete();
-
-          \Drupal::logger('menu_link_view')->notice('Deleted associated menu link content for view link @id', [
-            '@id' => $entity->id()
-          ]);
         }
       }
     }
 
-    // Invalidate necessary cache tags
+    // Invalidate cache tags
     Cache::invalidateTags([
       'menu:' . $entity->getMenuName(),
       'config:system.menu.' . $entity->getMenuName()
@@ -403,9 +500,6 @@ function menu_link_view_entity_delete($entity) {
 
 /**
  * Helper function to ensure a menu_link_content entity exists for the view link.
- *
- * @param \Drupal\menu_link_view\Entity\MenuLinkView $entity
- *   The menu link view entity.
  */
 function _menu_link_view_ensure_menu_link_content($entity) {
   $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
@@ -423,7 +517,6 @@ function _menu_link_view_ensure_menu_link_content($entity) {
     foreach ($menu_links as $menu_link) {
       $options = $menu_link->get('link')->options ?? [];
 
-      // Check if this menu link is associated with our entity
       if (!empty($options['menu_link_view']) &&
           !empty($options['menu_link_view']['entity_id']) &&
           $options['menu_link_view']['entity_id'] == $entity->id()) {
@@ -455,43 +548,31 @@ function _menu_link_view_ensure_menu_link_content($entity) {
       ],
       'menu_name' => $entity->getMenuName(),
       'weight' => $entity->getWeight(),
-      'expanded' => FALSE, // Set to FALSE since we don't want children
+      'expanded' => FALSE,
       'description' => $entity->getDescription(),
     ]);
 
-    // Set parent if available
     if ($entity->getParent()) {
       $menu_link->set('parent', $entity->getParent());
     }
 
     $menu_link->save();
-
-    \Drupal::logger('menu_link_view')->notice('Created menu link content for view link @id', [
-      '@id' => $entity->id()
-    ]);
-  }
-  else {
+  } else {
     // Update the existing menu link
     $existing_menu_link->set('title', $entity->label() . ' [View]');
     $existing_menu_link->set('description', $entity->getDescription());
     $existing_menu_link->set('weight', $entity->getWeight());
-    $existing_menu_link->set('expanded', FALSE); // Ensure it's never expanded
+    $existing_menu_link->set('expanded', FALSE);
 
-    // Update the link with our options
     $link = $existing_menu_link->get('link')->getValue();
-    $link['options'] = $options;
+    $link[0]['options'] = $options;
     $existing_menu_link->set('link', $link);
 
-    // Update parent if available
     if ($entity->getParent()) {
       $existing_menu_link->set('parent', $entity->getParent());
     }
 
     $existing_menu_link->save();
-
-    \Drupal::logger('menu_link_view')->notice('Updated menu link content for view link @id', [
-      '@id' => $entity->id()
-    ]);
   }
 }
 
@@ -517,8 +598,6 @@ function menu_link_view_preprocess_menu(&$variables) {
   }
 }
 
-
-
 /**
  * Implements hook_theme().
  */
@@ -538,492 +617,5 @@ function menu_link_view_theme() {
  * Implements hook_page_attachments().
  */
 function menu_link_view_page_attachments(array &$attachments) {
-  // Attach our CSS library.
   $attachments['#attached']['library'][] = 'menu_link_view/menu_link_view';
 }
-
-/**
- * Implements hook_menu_local_tasks_alter().
- */
-function menu_link_view_menu_local_tasks_alter(&$data, $route_name) {
-  // Remove add child link from menu view menu items
-  if ($route_name === 'entity.menu_link_content.canonical') {
-    $menu_link = \Drupal::routeMatch()->getParameter('menu_link_content');
-    if ($menu_link) {
-      $options = $menu_link->get('link')->options ?? [];
-      if (!empty($options['menu_link_view'])) {
-        // Remove the "Add child" link
-        foreach ($data['tabs'] as $key => $tabs) {
-          foreach ($tabs as $tab_key => $tab) {
-            if (isset($tab['#link']['url']) && $tab['#link']['url']->getRouteName() === 'entity.menu_link_content.add_form') {
-              unset($data['tabs'][$key][$tab_key]);
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-/**
- * Implements hook_entity_access().
- */
-function menu_link_view_entity_access(EntityInterface $entity, $operation, AccountInterface $account) {
-  // Only affect menu_link_content entities that are view links
-  if ($entity->getEntityTypeId() === 'menu_link_content') {
-    $options = $entity->get('link')->options ?? [];
-
-    // If this is one of our view links
-    if (!empty($options['menu_link_view'])) {
-      // Prevent direct edit/delete operations through menu_link_content UI
-      // Force users to go through our custom UI
-      if ($operation === 'update' || $operation === 'delete') {
-        $current_route = \Drupal::routeMatch()->getRouteName();
-
-        // Allow access only if coming from our own forms
-        $our_routes = [
-          'entity.menu_link_view.edit_form',
-          'entity.menu_link_view.delete_form',
-        ];
-
-        if (!in_array($current_route, $our_routes)) {
-          return AccessResult::forbidden('View menu links must be edited through the View Link interface');
-        }
-      }
-    }
-  }
-
-  // Don't change access for other entities
-  return AccessResult::neutral();
-}
-
-/**
- * Implements hook_menu_links_discovered_alter().
- *
- * This helps control the available operations for our menu items at a deeper level.
- */
-function menu_link_view_menu_links_discovered_alter(&$links) {
-  foreach ($links as $id => &$link) {
-    if (strpos($id, 'menu_link_content:') === 0) {
-      // We'll need to load the entity to check if it's a view menu item
-      $uuid = substr($id, strlen('menu_link_content:'));
-      $storage = \Drupal::entityTypeManager()->getStorage('menu_link_content');
-      $entities = $storage->loadByProperties(['uuid' => $uuid]);
-      $menu_link = reset($entities);
-
-      if ($menu_link) {
-        $options = $menu_link->get('link')->options ?? [];
-        if (!empty($options['menu_link_view'])) {
-          // For view menu items, prevent children
-          $link['metadata']['has_children'] = FALSE;
-        }
-      }
-    }
-  }
-}
-
-/**
- * Implements hook_cache_flush().
- */
-function menu_link_view_cache_flush() {
-  // Clear our cache tags when cache is flushed
-  \Drupal::cache()->deleteAll('menu_link_view:');
-}
-
-/**
- * Implements hook_preprocess_menu_local_task().
- */
-function menu_link_view_preprocess_menu_local_task(&$variables) {
-  // Ensure our synthetic menu items are properly themed as local tasks
-  if (!empty($variables['link']) && $variables['link'] instanceof \Drupal\Core\Url) {
-    // Check if this is one of our synthetic menu items
-    if (isset($variables['item']['original_link']) &&
-        $variables['item']['original_link'] instanceof \Drupal\menu_link_view\SyntheticMenuLink) {
-      // Add proper classes
-      $variables['attributes']['class'][] = 'menu-item';
-      $variables['attributes']['class'][] = 'menu-item--view-generated';
-    }
-  }
-}
-
-/**
- * Implements hook_preprocess_menu_local_action().
- */
-function menu_link_view_preprocess_menu_local_action(&$variables) {
-  // Ensure our synthetic menu items are properly themed as local actions
-  if (!empty($variables['link']) && $variables['link'] instanceof \Drupal\Core\Url) {
-    // Check if this is one of our synthetic menu items
-    if (isset($variables['attributes']['original_link']) &&
-        $variables['attributes']['original_link'] instanceof \Drupal\menu_link_view\SyntheticMenuLink) {
-      // Add proper classes
-      $variables['attributes']['class'][] = 'menu-item';
-      $variables['attributes']['class'][] = 'menu-item--view-generated';
-    }
-  }
-}
-
-/**
- * Implements hook_preprocess_menu_link().
- */
-function menu_link_view_preprocess_menu_link(&$variables) {
-  // Check if this is one of our synthetic menu links
-  if (isset($variables['element']['#original_link']) &&
-      $variables['element']['#original_link'] instanceof \Drupal\menu_link_view\SyntheticMenuLink) {
-
-    // Get the needed values from our link
-    $menu_link = $variables['element']['#original_link'];
-    $menu_name = $menu_link->getMenuName();
-    $is_active_trail = !empty($variables['element']['#in_active_trail']);
-    $level = isset($variables['element']['#level']) ? $variables['element']['#level'] : 1;
-
-    // Initialize attributes if needed
-    if (!isset($variables['attributes'])) {
-      $variables['attributes'] = [];
-    }
-
-    // Initialize classes array if needed
-    if (!isset($variables['attributes']['class'])) {
-      $variables['attributes']['class'] = [];
-    }
-
-    // Try to find menu item attributes to copy from
-    $sample_attributes = _menu_link_view_get_sample_attributes($level, $menu_name);
-
-    // Apply the sample attributes first, if found
-    if (!empty($sample_attributes)) {
-      foreach ($sample_attributes as $attr_name => $attr_value) {
-        // Don't overwrite already set attributes
-        if (!isset($variables['attributes'][$attr_name])) {
-          $variables['attributes'][$attr_name] = $attr_value;
-        }
-        // Merge classes if they exist
-        elseif ($attr_name === 'class' && is_array($attr_value)) {
-          $variables['attributes']['class'] = array_merge(
-            $variables['attributes']['class'],
-            $attr_value
-          );
-          // Remove duplicates
-          $variables['attributes']['class'] = array_unique($variables['attributes']['class']);
-        }
-      }
-    }
-    // Apply fallback attributes if no sample was found
-    else {
-      // Base fallback classes that standard Drupal menus use
-      $variables['attributes']['class'][] = 'menu-item';
-      $variables['attributes']['class'][] = 'menu-item--level-' . $level;
-
-      if ($menu_name) {
-        $variables['attributes']['class'][] = 'menu-item--' . str_replace('_', '-', $menu_name);
-      }
-
-      // Add data attributes that Drupal core typically uses
-      $variables['attributes']['role'] = 'presentation';
-      $variables['attributes']['data-menu-level'] = $level;
-    }
-
-    // These classes should always be applied regardless of whether we found a sample
-
-    // Add active and active-trail classes
-    if ($is_active_trail) {
-      $variables['attributes']['class'][] = 'menu-item--active-trail';
-    }
-
-    // Check if this specific link is active
-    $current_path = \Drupal::request()->getRequestUri();
-    $link_url = '';
-
-    try {
-      $link_url = $menu_link->getUrlObject()->toString();
-    }
-    catch (\Exception $e) {
-      // Just continue if we can't get the URL
-    }
-
-    if ($link_url !== '' && $current_path === $link_url) {
-      $variables['attributes']['class'][] = 'menu-item--active';
-      // Add aria-current attribute for accessibility
-      $variables['attributes']['aria-current'] = 'page';
-    }
-
-    // Add our special class at the end, but make it non-obtrusive
-    $variables['attributes']['class'][] = 'menu-item--view-generated';
-  }
-}
-
-/**
- * Helper function to get sample attributes from existing menu items.
- *
- * @param int $level
- *   The menu level to look for.
- * @param string $menu_name
- *   (optional) The menu name to look for.
- *
- * @return array
- *   The sample attributes array, or empty array if none found.
- */
-function _menu_link_view_get_sample_attributes($level, $menu_name = NULL) {
-  // Step 1: Try to get from the current page's render array
-  $items = _menu_link_view_get_menu_items_from_page();
-
-  // Step 2: If no items found, try to generate a sample menu item
-  if (empty($items) && \Drupal::hasContainer()) {
-    // Create a fake menu item to extract attributes
-    $items = _menu_link_view_get_simulated_menu_item($level, $menu_name);
-  }
-
-  // Step 3: Look for a matching menu item with the requested level
-  foreach ($items as $item) {
-    // Match by level and optionally menu name
-    if (isset($item['level']) && $item['level'] == $level) {
-      // If a menu name was specified, match that too
-      if ($menu_name && isset($item['menu_name']) && $item['menu_name'] != $menu_name) {
-        continue;
-      }
-
-      // Found a match
-      return $item['attributes'] ?? [];
-    }
-  }
-
-  // Step 4: If no exact matches, return any found item's attributes or empty array
-  return !empty($items[0]['attributes']) ? $items[0]['attributes'] : [];
-}
-
-/**
- * Helper function to extract menu items from the current page render array.
- *
- * @return array
- *   An array of menu items with their attributes.
- */
-function _menu_link_view_get_menu_items_from_page() {
-  static $items = NULL;
-
-  // Only scan once per page load
-  if ($items !== NULL) {
-    return $items;
-  }
-
-  $items = [];
-
-  // Try to get from the current page's render array
-  // This is used as a sample to copy attributes from
-  $render_arrays = &drupal_static('drupal_render');
-  if (empty($render_arrays)) {
-    return $items;
-  }
-
-  // Look through the render arrays for menu items
-  foreach ($render_arrays as $id => $array) {
-    if (isset($array['#theme']) && $array['#theme'] == 'menu') {
-      if (!empty($array['#items'])) {
-        _menu_link_view_extract_menu_item_attributes($array['#items'], $items, 1, $array['#menu_name'] ?? NULL);
-      }
-    }
-  }
-
-  return $items;
-}
-
-/**
- * Helper function to create a simulated menu item for attribute extraction.
- *
- * This creates a temporary menu item render array to extract the default
- * attributes that Drupal's menu system would apply.
- *
- * @param int $level
- *   The menu level to simulate.
- * @param string $menu_name
- *   (optional) The menu name to use.
- *
- * @return array
- *   Array containing the simulated menu item with attributes.
- */
-function _menu_link_view_get_simulated_menu_item($level, $menu_name = NULL) {
-  // Use a temporary menu name if none provided
-  $menu_name = $menu_name ?: 'main';
-
-  // Create a simple menu link
-  $url = Url::fromRoute('<front>');
-  $title = 'Simulated menu item';
-
-  // Build a simulated menu link tree element
-  $element = [
-    '#theme' => 'menu_link',
-    '#title' => $title,
-    '#url' => $url,
-    '#attributes' => [],
-    '#below' => [],
-    '#level' => $level,
-    '#menu_name' => $menu_name,
-  ];
-
-  // Use Drupal's core menu theme implementation to render it
-  $menu_template = \Drupal::service('theme.registry')->get('menu_link__' . $menu_name) ??
-                  \Drupal::service('theme.registry')->get('menu_link');
-
-  // Build a temporary render array using the menu item
-  $variables = [];
-  if (isset($menu_template['variables'])) {
-    foreach ($menu_template['variables'] as $key => $value) {
-      $variables[$key] = $element['#' . $key] ?? $value;
-    }
-  }
-
-  // If there's a preprocess function for menu links, call it to populate default attributes
-  if (function_exists('template_preprocess_menu_link')) {
-    template_preprocess_menu_link($variables);
-  }
-
-  // Return the processed attributes
-  return [
-    [
-      'level' => $level,
-      'menu_name' => $menu_name,
-      'attributes' => $variables['attributes'] ?? [],
-    ]
-  ];
-}
-
-/**
- * Helper function to extract attributes from a menu tree.
- *
- * @param array $tree
- *   The menu tree structure.
- * @param array &$items
- *   Reference to the array where extracted items will be stored.
- * @param int $level
- *   The current level in the tree.
- * @param string $menu_name
- *   (optional) The name of the menu.
- */
-function _menu_link_view_extract_menu_item_attributes(array $tree, array &$items, $level = 1, $menu_name = NULL) {
-  foreach ($tree as $key => $item) {
-    // Only process actual menu items
-    if (!is_numeric($key)) {
-      continue;
-    }
-
-    // Skip our synthetic items
-    if (isset($item['original_link']) &&
-        $item['original_link'] instanceof \Drupal\menu_link_view\SyntheticMenuLink) {
-      continue;
-    }
-
-    // Extract the attributes
-    if (isset($item['attributes'])) {
-      $items[] = [
-        'level' => $level,
-        'menu_name' => $menu_name,
-        'attributes' => $item['attributes'],
-      ];
-    }
-
-    // Process child items
-    if (!empty($item['below'])) {
-      _menu_link_view_extract_menu_item_attributes($item['below'], $items, $level + 1, $menu_name);
-    }
-  }
-}
-
-
-/**
- * Implements hook_form_FORM_ID_alter() for menu_edit_form.
- */
-function menu_link_view_form_menu_edit_form_alter(&$form, FormStateInterface $form_state, $form_id) {
-  $form['#after_build'][] = 'menu_link_view_menu_form_after_build';
-}
-
-/**
- * After-build callback for the menu edit form.
- *
- * This runs after the operations have been added to the form.
- */
-function menu_link_view_menu_form_after_build($form, FormStateInterface $form_state) {
-  // No menu links to process
-  if (empty($form['links']['links'])) {
-    return $form;
-  }
-
-  // Create a library for our admin styles if it's needed
-  $add_library = FALSE;
-
-  // Process each menu item
-  foreach (Element::children($form['links']['links']) as $id) {
-    if (!isset($form['links']['links'][$id]['#item'])) {
-      continue;
-    }
-
-    $item = $form['links']['links'][$id]['#item'];
-
-    // Check if this is a view link menu item
-    if (_menu_link_view_is_view_link($item)) {
-      // Add our custom admin styling
-      $add_library = TRUE;
-
-      // Add a class to the menu item for styling
-      if (!isset($form['links']['links'][$id]['#attributes']['class'])) {
-        $form['links']['links'][$id]['#attributes']['class'] = [];
-      }
-      $form['links']['links'][$id]['#attributes']['class'][] = 'menu-link-view-item';
-
-      // Check for operations
-      if (isset($form['links']['links'][$id]['operations']['#links'])) {
-        // Remove the 'add' operation if it exists
-        if (isset($form['links']['links'][$id]['operations']['#links']['add'])) {
-          unset($form['links']['links'][$id]['operations']['#links']['add']);
-        }
-      }
-    }
-  }
-
-  // If we modified any items, attach our library
-  if ($add_library) {
-    $form['#attached']['library'][] = 'menu_link_view/admin';
-  }
-
-  return $form;
-}
-
-/**
- * Helper function to determine if a menu item is a view link.
- *
- * @param mixed $menu_item
- *   The menu item to check - can be either a MenuLinkInterface or MenuLinkTreeElement.
- *
- * @return bool
- *   TRUE if this is a menu view link, FALSE otherwise.
- */
-function _menu_link_view_is_view_link($menu_item) {
-  if (!$menu_item) {
-    return FALSE;
-  }
-
-  // Handle both MenuLinkInterface and MenuLinkTreeElement
-  $menu_link = NULL;
-
-  if ($menu_item instanceof MenuLinkTreeElement) {
-    $menu_link = $menu_item->link;
-  }
-  elseif ($menu_item instanceof MenuLinkInterface) {
-    $menu_link = $menu_item;
-  }
-  else {
-    // Not a menu link we can check
-    return FALSE;
-  }
-
-  // Check for our provider
-  if ($menu_link && $menu_link->getProvider() == 'menu_link_view') {
-    return TRUE;
-  }
-
-  // Or check the options for menu_link_view data
-  $options = $menu_link->getOptions();
-  if (!empty($options['menu_link_view'])) {
-    return TRUE;
-  }
-
-  return FALSE;
-}
-

@@ -199,13 +199,32 @@ class MenuLinkView extends ConfigEntityBase implements MenuLinkViewInterface {
   /**
    * {@inheritdoc}
    */
+  public function calculateDependencies() {
+    parent::calculateDependencies();
+
+    // Add dependency on the view.
+    if ($this->getViewId()) {
+      $view_storage = \Drupal::entityTypeManager()->getStorage('view');
+      if ($view = $view_storage->load($this->getViewId())) {
+        $this->addDependency('config', $view->getConfigDependencyName());
+      }
+    }
+
+    // Add dependency on the menu.
+    if ($this->getMenuName()) {
+      $this->addDependency('config', 'system.menu.' . $this->getMenuName());
+    }
+
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function postSave(EntityStorageInterface $storage, $update = TRUE) {
     parent::postSave($storage, $update);
 
-    // Rebuild the menu link plugin definitions.
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-    // Invalidate menu and render cache tags.
+    // Invalidate menu cache tags - minimal caching as requested.
     \Drupal::service('cache_tags.invalidator')->invalidateTags([
       'menu:' . $this->getMenuName(),
       'menu_link_view',
@@ -218,10 +237,7 @@ class MenuLinkView extends ConfigEntityBase implements MenuLinkViewInterface {
   public static function postDelete(EntityStorageInterface $storage, array $entities) {
     parent::postDelete($storage, $entities);
 
-    // Rebuild the menu link plugin definitions.
-    \Drupal::service('plugin.manager.menu.link')->rebuild();
-
-    // Invalidate menu and render cache tags.
+    // Invalidate menu cache tags.
     $tags = ['menu_link_view'];
     foreach ($entities as $entity) {
       $tags[] = 'menu:' . $entity->getMenuName();
