@@ -79,8 +79,11 @@ function menu_link_view_form_alter(&$form, FormStateInterface $form_state, $form
     // Add our custom JS/CSS to prevent children for view items
     $form['#attached']['library'][] = 'menu_link_view/admin';
 
-    // Add our custom validate handler to prevent children server-side
-    $form['#validate'][] = 'menu_link_view_menu_edit_form_validate';
+    // CRITICAL: Add our validation handler FIRST to fix values before they're saved
+    array_unshift($form['#validate'], 'menu_link_view_menu_edit_form_validate');
+
+    // Add submit handler to run before the default submit
+    array_unshift($form['#submit'], 'menu_link_view_menu_edit_form_submit');
 
     // Process menu links after they're built
     $form['#after_build'][] = 'menu_link_view_menu_form_after_build';
@@ -246,8 +249,9 @@ function menu_link_view_menu_edit_form_validate($form, FormStateInterface $form_
   \Drupal::logger('menu_link_view')->info('Found @count view menu items', ['@count' => count($view_menu_items)]);
 
   $found_invalid_relationships = FALSE;
+  $corrected_values = $values;
 
-  // Check for invalid relationships and show errors
+  // Check for invalid relationships and fix them immediately
   foreach ($values['links'] as $id => $item) {
     if (is_string($id) && !empty($item['parent']) && isset($view_menu_items[$item['parent']])) {
       \Drupal::logger('menu_link_view')->warning('VALIDATION ERROR: @id trying to be child of @parent', [
@@ -266,17 +270,36 @@ function menu_link_view_menu_edit_form_validate($form, FormStateInterface $form_
           '%parent' => $view_menu_items[$item['parent']],
         ])
       );
+
+      // CRITICAL: Fix the value immediately in the form state
+      $corrected_values['links'][$id]['parent'] = '';
+
+      \Drupal::logger('menu_link_view')->info('Corrected invalid parent for @id in form values', ['@id' => $id]);
     }
   }
 
-  // NUCLEAR OPTION: If we found invalid relationships, clear ALL user input
-  // This will force the form to rebuild from database/default values only
+  // If we found invalid relationships, update form state with corrected values
   if ($found_invalid_relationships) {
-    \Drupal::logger('menu_link_view')->warning('NUCLEAR OPTION: Clearing all user input to break persistence cycle');
-    $form_state->setUserInput([]);
+    \Drupal::logger('menu_link_view')->warning('Updating form state with corrected values');
 
-    // Also set a flag so we can detect this on rebuild
+    // Update the form state with corrected values
+    $form_state->setValues($corrected_values);
+
+    // Also clear user input to ensure it doesn't persist
+    $user_input = $form_state->getUserInput();
+    if (!empty($user_input['links'])) {
+      foreach ($corrected_values['links'] as $id => $item) {
+        if (isset($user_input['links'][$id])) {
+          $user_input['links'][$id]['parent'] = $item['parent'];
+        }
+      }
+      $form_state->setUserInput($user_input);
+    }
+
+    // Set a flag so we can detect this on rebuild
     $form_state->set('menu_link_view_cleared_input', TRUE);
+
+    \Drupal::logger('menu_link_view')->info('Corrected form values to prevent invalid relationships from being saved');
   }
 
   \Drupal::logger('menu_link_view')->info('=== VALIDATION END ===');
@@ -343,34 +366,39 @@ function _menu_link_view_fix_invalid_parent_in_database($menu_link_id, $invalid_
  * Submit handler to clean up invalid parent relationships.
  */
 function menu_link_view_menu_edit_form_submit($form, FormStateInterface $form_state) {
-  // Only run if there were validation errors
-  if ($form_state->getErrors()) {
-    return;
-  }
+  \Drupal::logger('menu_link_view')->info('=== SUBMIT HANDLER START ===');
 
   $values = $form_state->getValues();
 
   if (empty($values['links'])) {
+    \Drupal::logger('menu_link_view')->info('No links in form values');
     return;
   }
 
   // Get all our view menu items
   $view_menu_items = _menu_link_view_get_view_menu_items();
   $cleaned_values = $values;
+  $found_invalid = FALSE;
 
   // Clean up any invalid parent relationships that might have slipped through
   foreach ($cleaned_values['links'] as $id => &$item) {
     if (is_string($id) && !empty($item['parent']) && isset($view_menu_items[$item['parent']])) {
       // Reset invalid parents
       $item['parent'] = '';
+      $found_invalid = TRUE;
 
       // Log this cleanup
-      \Drupal::logger('menu_link_view')->info('Cleaned up invalid parent relationship for menu item @id', ['@id' => $id]);
+      \Drupal::logger('menu_link_view')->warning('SUBMIT: Cleaned up invalid parent relationship for menu item @id', ['@id' => $id]);
     }
   }
 
-  // Update form state with cleaned values
-  $form_state->setValues($cleaned_values);
+  // Update form state with cleaned values if we found any invalid relationships
+  if ($found_invalid) {
+    $form_state->setValues($cleaned_values);
+    \Drupal::logger('menu_link_view')->warning('SUBMIT: Updated form state with cleaned values');
+  }
+
+  \Drupal::logger('menu_link_view')->info('=== SUBMIT HANDLER END ===');
 }
 
 /**
@@ -618,4 +646,27 @@ function menu_link_view_theme() {
  */
 function menu_link_view_page_attachments(array &$attachments) {
   $attachments['#attached']['library'][] = 'menu_link_view/menu_link_view';
+}
+
+/**
+ * Implements hook_menu_link_content_presave().
+ */
+function menu_link_view_menu_link_content_presave(MenuLinkContent $entity) {
+  // Get all our view menu items
+  $view_menu_items = _menu_link_view_get_view_menu_items();
+
+  // Check if this entity is trying to set a view item as its parent
+  $parent = $entity->getParentId();
+  if ($parent && isset($view_menu_items[$parent])) {
+    \Drupal::logger('menu_link_view')->warning('PRESAVE: Preventing menu link @id from having view item @parent as parent', [
+      '@id' => $entity->uuid(),
+      '@parent' => $parent
+    ]);
+
+    // Reset the parent to empty
+    $entity->set('parent', '');
+
+    // Add a message to inform the user
+    \Drupal::messenger()->addWarning(t('Menu items cannot be placed under view menu items. The item has been placed at the root level instead.'));
+  }
 }
