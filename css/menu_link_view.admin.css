@@ -121,3 +121,26 @@ tr.tabledrag-leaf.drag-hover-no-drop,
   margin-top: 0.5em;
   max-width: 250px;
 }
+
+/* Drag handle styling for view items */
+.menu-link-view-item .tabledrag-handle {
+  /* Don't interfere with drag handle positioning */
+}
+
+/* Remove the visual indicator that was causing positioning issues */
+/* .menu-link-view-item.no-child-allowed .tabledrag-handle::after - REMOVED */
+
+/* CRITICAL: Don't interfere with Drupal's indentation system at all */
+.menu-link-view-item .js-indentation.indentation {
+  /* Let Drupal handle all indentation completely */
+}
+
+/* Ensure we don't override any table cell styling that affects indentation */
+.menu-link-view-item td {
+  /* No padding, margin, or border changes that could affect indentation */
+}
+
+/* Ensure tabledrag handles work normally */
+.menu-link-view-item .tabledrag-handle {
+  /* Don't interfere with drag handle positioning */
+}
